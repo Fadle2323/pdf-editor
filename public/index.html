@@ -45,6 +45,11 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #d4c4b7; border-radius: 10px; }
         .btn-disabled { opacity: 0.45; pointer-events: none; }
         .tool-active { background: #d4a373 !important; color: #5b3912 !important; }
+        .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .status-dot-checking { background: #b7aea4; animation: dotPulse 1.2s ease-in-out infinite; }
+        .status-dot-connected { background: #3a8f5a; }
+        .status-dot-offline { background: #ba1a1a; }
+        @keyframes dotPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
         #toast-container { position: fixed; bottom: 16px; right: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: calc(100vw - 32px); }
         .toast { min-width: 220px; max-width: 360px; padding: 12px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); animation: toast-in 0.2s ease; }
         .toast-success { background: #eaf7ee; color: #1e6b34; border: 1px solid #b9e4c4; }
@@ -145,7 +150,10 @@
       </div>
   </div>
 </div>
-<span id="connection-status" class="font-label-sm text-on-surface-variant hidden sm:inline-block">Backend: checking...</span>
+<span id="connection-status" class="font-label-sm text-on-surface-variant hidden sm:inline-flex items-center gap-1.5">
+<span id="connection-dot" class="status-dot status-dot-checking"></span>
+<span id="connection-text">Memeriksa backend...</span>
+</span>
 </header>
 
 <aside id="app-aside" class="hidden md:flex flex-col h-screen pt-16 pb-4 px-4 fixed left-0 w-64 bg-surface-container-low border-r border-outline-variant z-40">
@@ -446,9 +454,16 @@
   }
 
   async function checkBackendHealth() {
-    const el = document.getElementById('connection-status');
-    try { await apiFetch('/health'); el.textContent = 'Backend: connected'; el.classList.add('text-primary'); }
-    catch (e) { el.textContent = 'Backend: offline'; el.classList.add('text-error'); }
+    const dot = document.getElementById('connection-dot');
+    const text = document.getElementById('connection-text');
+    try {
+      await apiFetch('/health');
+      dot.className = 'status-dot status-dot-connected';
+      text.textContent = 'Backend: connected';
+    } catch (e) {
+      dot.className = 'status-dot status-dot-offline';
+      text.textContent = 'Backend: offline';
+    }
   }
 
   // ================== DOWNLOAD (dengan opsi pilih folder via File System Access API) ==================
