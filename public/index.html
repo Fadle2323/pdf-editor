@@ -3,6 +3,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Scripta | Workspace</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,600&family=Great+Vibes&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -109,6 +110,21 @@
         .logo-container:hover .quill-tip { animation: quillTilt 0.4s forwards cubic-bezier(0.25, 1, 0.5, 1); }
         @keyframes quillTilt { 0% { transform: rotate(0deg); } 100% { transform: rotate(-15deg) translate(-1px, -1px); } }
 
+        /* ================== PRELOADER ================== */
+        #preloader {
+            position: fixed; inset: 0; z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            background: #F9FAFB;
+            transition: opacity 0.6s cubic-bezier(0.65, 0, 0.35, 1), transform 0.6s cubic-bezier(0.65, 0, 0.35, 1);
+        }
+        #preloader.fade-out { opacity: 0; transform: translateY(-24px); pointer-events: none; }
+        #preloader .preloader-inner { display: flex; flex-direction: column; align-items: center; opacity: 0; transform: scale(0.92); animation: preloaderIn 0.7s forwards cubic-bezier(0.25, 1, 0.5, 1); }
+        @keyframes preloaderIn { to { opacity: 1; transform: scale(1); } }
+        #preloader .logo-container { transform: scale(1.9); cursor: default; }
+        #preloader .loading-bar-wrapper { width: 140px; height: 3px; background: rgba(212, 163, 115, 0.2); border-radius: 999px; overflow: hidden; margin-top: 40px; }
+        #preloader .loading-bar-fill { height: 100%; width: 0%; background: #D4A373; border-radius: 999px; animation: loadingBarFill 2.1s cubic-bezier(0.65, 0, 0.35, 1) forwards; animation-delay: 0.3s; }
+        @keyframes loadingBarFill { to { width: 100%; } }
+
         @media (max-width: 767px) {
           #app-aside { display: none !important; }
           #app-main { padding-left: 0 !important; flex-direction: column; }
@@ -118,6 +134,67 @@
     </style>
 </head>
 <body class="grain-bg text-on-surface font-body-md h-screen flex flex-col overflow-hidden">
+  <!-- ================== PRELOADER ================== -->
+  <div id="preloader">
+    <div class="preloader-inner">
+      <div class="logo-container">
+        <div class="paper-icon-wrapper">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+              <g class="paper-sheet-back">
+                  <path d="M7 5C7 3.89543 7.89543 3 9 3H15L19 7V13C19 14.1046 18.1046 15 17 15H7V5Z" fill="#D4A373" fill-opacity="0.4"></path>
+                  <path d="M15 3V7H19L15 3Z" fill="#B38659" fill-opacity="0.4"></path>
+              </g>
+              <g class="paper-sheet-front">
+                  <path d="M4 9C4 7.89543 4.89543 7 6 7H12L16 11V19C16 20.1046 15.1046 21 14 21H6C4.89543 21 4 20.1046 4 19V9Z" fill="#D4A373"></path>
+                  <path d="M12 7V11H16L12 7Z" fill="#B38659"></path>
+                  <line x1="7" y1="12" x2="11" y2="12" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+                  <line x1="7" y1="15" x2="13" y2="15" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+                  <line x1="7" y1="18" x2="11" y2="18" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+              </g>
+          </svg>
+        </div>
+        <div class="name-sig-wrapper">
+            <span class="font-brand">scripta</span>
+            <div class="signature-wrapper">
+                <svg class="underline-path-svg" viewBox="0 0 100 16" preserveAspectRatio="none">
+                    <path class="underline-path" d="M2 4 C 15 10, 45 12, 85 6"></path>
+                </svg>
+                <div class="quill-tip">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M21.5,2.5 C21.5,2.5 16,3 12,7 C8,11 7,16 7,16 L4,20 L4,21 L5,21 L9,17 C9,17 14,16 18,12 C22,8 21.5,2.5 21.5,2.5 Z M9.5,15.5 C8.5,16.5 7.5,17 7.5,17 C7.5,17 8,16 9,15 C9,15 9.5,15.5 9.5,15.5 Z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+      </div>
+      <div class="loading-bar-wrapper">
+        <div class="loading-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var pageStart = Date.now();
+    var MIN_DURATION = 2500; // ms
+
+    function hidePreloader() {
+      var preloader = document.getElementById('preloader');
+      if (!preloader) return;
+      var elapsed = Date.now() - pageStart;
+      var remaining = Math.max(0, MIN_DURATION - elapsed);
+      setTimeout(function () {
+        preloader.classList.add('fade-out');
+        preloader.addEventListener('transitionend', function onEnd() {
+          preloader.style.display = 'none';
+          preloader.removeEventListener('transitionend', onEnd);
+        });
+      }, remaining);
+    }
+
+    if (document.readyState === 'complete') hidePreloader();
+    else window.addEventListener('load', hidePreloader);
+  })();
+  </script>
 
 <header class="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-margin-desktop h-16 bg-surface border-b border-outline-variant">
 <div class="logo-container">
