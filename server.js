@@ -44,7 +44,7 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 app.listen(config.port, '0.0.0.0', () => {
-  console.log(`\n🚀 PDF Editor berjalan di port ${config.port}`);
+  console.log(`\n🚀 Scripta berjalan di port ${config.port}`);
   console.log(`   Buka aplikasi di browser`);
   console.log(`   API base URL: /api\n`);
   scheduleAutoCleanup();
