@@ -45,7 +45,7 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #d4c4b7; border-radius: 10px; }
         .btn-disabled { opacity: 0.45; pointer-events: none; }
         .tool-active { background: #d4a373 !important; color: #5b3912 !important; }
-        .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid #fbf9f6; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
         .status-dot-checking { background: #b7aea4; animation: dotPulse 1.2s ease-in-out infinite; }
         .status-dot-connected { background: #3a8f5a; }
         .status-dot-offline { background: #ba1a1a; }
@@ -150,9 +150,7 @@
       </div>
   </div>
 </div>
-<span id="connection-status" class="font-label-sm text-on-surface-variant hidden sm:inline-flex items-center gap-1.5">
-<span id="connection-dot" class="status-dot status-dot-checking"></span>
-<span id="connection-text">Memeriksa backend...</span>
+<span id="connection-dot" class="status-dot status-dot-checking hidden sm:inline-block" title="Memeriksa backend..."></span>
 </span>
 </header>
 
@@ -455,14 +453,13 @@
 
   async function checkBackendHealth() {
     const dot = document.getElementById('connection-dot');
-    const text = document.getElementById('connection-text');
     try {
       await apiFetch('/health');
-      dot.className = 'status-dot status-dot-connected';
-      text.textContent = 'Backend: connected';
+      dot.className = 'status-dot status-dot-connected hidden sm:inline-block';
+      dot.title = 'Backend: connected';
     } catch (e) {
-      dot.className = 'status-dot status-dot-offline';
-      text.textContent = 'Backend: offline';
+      dot.className = 'status-dot status-dot-offline hidden sm:inline-block';
+      dot.title = 'Backend: offline';
     }
   }
 
