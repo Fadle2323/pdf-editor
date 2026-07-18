@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PDF Editor | Workspace</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-container": "#66625b", "surface-bright": "#fbf9f6", "surface": "#fbf9f6",
+                    "on-surface": "#1b1c1a", "on-secondary": "#ffffff", "error": "#ba1a1a",
+                    "on-primary-container": "#5b3912", "surface-container-low": "#f5f3f0",
+                    "surface-container-lowest": "#ffffff", "outline": "#82756a", "outline-variant": "#d4c4b7",
+                    "secondary": "#625e57", "on-surface-variant": "#50453b", "error-container": "#ffdad6",
+                    "background": "#fbf9f6", "primary": "#7d562d", "on-error": "#ffffff",
+                    "surface-container-highest": "#e4e2df", "surface-container": "#efeeeb",
+                    "primary-container": "#d4a373", "surface-variant": "#e4e2df",
+                    "surface-container-high": "#eae8e5", "secondary-container": "#e6dfd5"
+            },
+            "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+            "spacing": { "unit-4": "16px", "gutter": "20px", "unit-6": "24px", "unit-12": "48px",
+                    "margin-desktop": "32px", "unit-1": "4px", "unit-2": "8px" },
+            "fontFamily": { "body-md": ["Inter"], "label-sm": ["Inter"], "body-serif": ["Literata"], "display-doc": ["Literata"] },
+            "fontSize": {
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "display-doc": ["24px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .grain-bg { background-color: #fbf9f6; background-image: url("https://www.transparenttextures.com/patterns/natural-paper.png"); }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+        .pdf-page-shadow { box-shadow: 0 4px 20px rgba(58, 58, 58, 0.08); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #d4c4b7; border-radius: 10px; }
+        .btn-disabled { opacity: 0.45; pointer-events: none; }
+        .tool-active { background: #d4a373 !important; color: #5b3912 !important; }
+        #toast-container { position: fixed; bottom: 16px; right: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: calc(100vw - 32px); }
+        .toast { min-width: 220px; max-width: 360px; padding: 12px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); animation: toast-in 0.2s ease; }
+        .toast-success { background: #eaf7ee; color: #1e6b34; border: 1px solid #b9e4c4; }
+        .toast-error { background: #ffdad6; color: #93000a; border: 1px solid #ffb4a9; }
+        .toast-info { background: #efeeeb; color: #1b1c1a; border: 1px solid #d4c4b7; }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        #loading-overlay { position: fixed; inset: 0; background: rgba(27,28,26,0.35); z-index: 90; display: none; align-items: center; justify-content: center; }
+        #loading-overlay.active { display: flex; }
+        .spinner { width: 36px; height: 36px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #pages-container { display: flex; flex-direction: column; align-items: center; gap: 32px; padding-bottom: 80px; }
+        .page-wrapper { position: relative; background: #fff; }
+        .page-wrapper canvas { display: block; max-width: none; }
+        .page-number-label { position: absolute; top: -22px; left: 0; }
+        .overlay-layer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; touch-action: none; }
+        .word-box { position: absolute; cursor: pointer; }
+        .word-box:hover { background: rgba(212, 163, 115, 0.25); }
+        .word-box.selected { background: rgba(212, 163, 115, 0.45); outline: 1px solid #7d562d; }
+        .snip-box { position: absolute; border: 2px dashed #7d562d; background: rgba(212, 163, 115, 0.2); pointer-events: none; }
+
+        .annotation-box { position: absolute; border: 1px dashed #7d562d; background: rgba(255,255,255,0.9); }
+        .annotation-box .ann-handle { position: absolute; left: 2px; top: 2px; cursor: move; opacity: 0; transition: opacity .15s; z-index: 5; }
+        .annotation-box .ann-delete { position: absolute; right: 2px; top: 2px; cursor: pointer; color: #ba1a1a; opacity: 0; transition: opacity .15s; z-index: 5; }
+        .annotation-box .ann-resize { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; background: #7d562d; border-radius: 50%; cursor: nwse-resize; opacity: 0; transition: opacity .15s; z-index: 5; }
+        .annotation-box:hover .ann-handle, .annotation-box:hover .ann-delete, .annotation-box:hover .ann-resize { opacity: 1; }
+        .annotation-box img { width: 100%; height: 100%; pointer-events: none; user-select: none; }
+        .annotation-text-content { white-space: pre-wrap; padding: 2px 20px; }
+
+        #esign-modal, #split-modal { position: fixed; inset: 0; z-index: 110; background: rgba(27,28,26,0.45); display: none; align-items: center; justify-content: center; padding: 16px; }
+        #esign-modal.active, #split-modal.active { display: flex; }
+        #esign-pad { touch-action: none; }
+
+        .thumb-item { position: relative; cursor: pointer; border: 3px solid transparent; border-radius: 4px; overflow: hidden; }
+        .thumb-item.selected { border-color: #7d562d; }
+        .thumb-item .thumb-check { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 2px solid #d4c4b7; display: flex; align-items: center; justify-content: center; }
+        .thumb-item.selected .thumb-check { background: #7d562d; border-color: #7d562d; }
+        .thumb-item.selected .thumb-check .material-symbols-outlined { color: #fff; font-size: 14px; }
+        .thumb-item canvas { display: block; width: 100%; }
+        .thumb-item .thumb-label { text-align: center; font-size: 11px; padding: 2px 0; color: #50453b; }
+
+        @media (max-width: 767px) {
+          #app-aside { display: none !important; }
+          #app-main { padding-left: 0 !important; flex-direction: column; }
+          #left-section, #right-section { width: 100% !important; border-left: none !important; }
+          #footer-copyright { display: none; }
+        }
+    </style>
+</head>
+<body class="grain-bg text-on-surface font-body-md h-screen flex flex-col overflow-hidden">
+
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-margin-desktop h-16 bg-surface border-b border-outline-variant">
+<span class="font-display-doc text-display-doc text-primary leading-none">PDF Editor</span>
+<span id="connection-status" class="font-label-sm text-on-surface-variant hidden sm:inline-block">Backend: checking...</span>
+</header>
+
+<aside id="app-aside" class="hidden md:flex flex-col h-screen pt-16 pb-4 px-4 fixed left-0 w-64 bg-surface-container-low border-r border-outline-variant z-40">
+<div class="flex flex-col gap-unit-2 mt-4">
+<div class="px-4 py-2 flex items-center gap-3 bg-primary-container text-on-primary-container rounded-lg font-medium">
+<span class="material-symbols-outlined">edit</span><span class="font-label-sm">Tools</span>
+</div>
+</div>
+</aside>
+
+<main id="app-main" class="flex-1 flex md:pl-64 pt-16 pb-10 overflow-hidden">
+<!-- Left: PDF viewer (scroll vertikal, semua halaman) -->
+<section id="left-section" class="w-full md:w-3/5 relative bg-surface-container-lowest flex flex-col items-center p-unit-6 overflow-auto custom-scrollbar">
+
+<!-- Toolbar -->
+<div class="sticky top-0 z-30 mb-unit-6 flex items-center gap-unit-1 bg-white/90 backdrop-blur-md px-3 py-2 rounded-full border border-outline-variant pdf-page-shadow flex-wrap justify-center">
+<button id="toggle-detect-words" class="px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Deteksi semua kata">
+<span class="material-symbols-outlined text-[18px]">auto_awesome</span> Deteksi Kata
+</button>
+<button id="btn-select-all" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Pilih semua kata di halaman aktif">
+<span class="material-symbols-outlined text-[18px]">select_all</span> Select All
+</button>
+<button id="tool-addtext" class="px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Klik di halaman untuk menambah teks">
+<span class="material-symbols-outlined text-[18px]">title</span> Add Text
+</button>
+<button id="tool-esign" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Buat & tempel tanda tangan">
+<span class="material-symbols-outlined text-[18px]">draw</span> E-Sign
+</button>
+<div class="h-4 w-px bg-outline-variant"></div>
+<button id="btn-undo" class="btn-disabled p-2 rounded-full hover:bg-surface-variant" title="Undo">
+<span class="material-symbols-outlined text-[18px]">undo</span>
+</button>
+<button id="btn-redo" class="btn-disabled p-2 rounded-full hover:bg-surface-variant" title="Redo">
+<span class="material-symbols-outlined text-[18px]">redo</span>
+</button>
+<div class="h-4 w-px bg-outline-variant"></div>
+<span id="page-indicator" class="font-label-sm text-on-surface-variant px-2">Halaman - / -</span>
+<div class="h-4 w-px bg-outline-variant"></div>
+<button id="btn-zoom-out" class="btn-disabled p-2 rounded-full hover:bg-surface-variant" title="Zoom out">
+<span class="material-symbols-outlined text-[18px]">zoom_out</span>
+</button>
+<span id="zoom-indicator" class="font-label-sm text-on-surface-variant w-12 text-center">100%</span>
+<button id="btn-zoom-in" class="btn-disabled p-2 rounded-full hover:bg-surface-variant" title="Zoom in">
+<span class="material-symbols-outlined text-[18px]">zoom_in</span>
+</button>
+</div>
+
+<p id="tool-hint" class="font-label-sm text-on-surface-variant mb-unit-4 text-center hidden"></p>
+<p id="pending-hint" class="font-label-sm text-primary mb-unit-4 text-center hidden"></p>
+
+<!-- Format toolbar utk Add Text (muncul saat ada teks yg sedang diedit) -->
+<div id="text-format-bar" class="sticky top-14 z-30 mb-unit-4 hidden flex-wrap items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl border border-outline-variant pdf-page-shadow">
+<select id="fmt-font-family" class="text-label-sm border border-outline-variant rounded px-2 py-1">
+<option value="Helvetica">Helvetica</option>
+<option value="TimesRoman">Times New Roman</option>
+<option value="Courier">Courier</option>
+<option value="Symbol">Symbol</option>
+<option value="ZapfDingbats">ZapfDingbats</option>
+</select>
+<input id="fmt-font-size" type="number" min="6" max="96" value="14" class="w-14 text-label-sm border border-outline-variant rounded px-1 py-1"/>
+<button id="fmt-bold" class="w-8 h-8 rounded border border-outline-variant font-bold text-label-sm hover:bg-surface-variant">B</button>
+<button id="fmt-italic" class="w-8 h-8 rounded border border-outline-variant italic text-label-sm hover:bg-surface-variant">I</button>
+<button id="fmt-underline" class="w-8 h-8 rounded border border-outline-variant underline text-label-sm hover:bg-surface-variant">U</button>
+<select id="fmt-list-type" class="text-label-sm border border-outline-variant rounded px-2 py-1">
+<option value="none">Tanpa List</option>
+<option value="numbered">Numbering (1. 2. 3.)</option>
+<option value="bulleted">Bullet (•)</option>
+<option value="multilevel">Multilevel (Tab = level)</option>
+</select>
+<input id="fmt-color" type="color" value="#1b1c1a" class="w-8 h-8 border border-outline-variant rounded cursor-pointer"/>
+<span class="font-label-sm text-on-surface-variant">Tab = indent (multilevel)</span>
+</div>
+
+<div id="pages-container"></div>
+<p id="empty-state" class="opacity-50 mt-12 text-center max-w-xs">Upload file PDF di panel kanan untuk mulai mengedit langsung di atas halamannya. Seret (drag) di halaman untuk menyeleksi area secara manual — bisa lebih dari satu area sekaligus. Scroll ke bawah untuk pindah halaman.</p>
+</section>
+
+<!-- Right: Control Panel -->
+<section id="right-section" class="w-full md:w-2/5 border-l border-outline-variant bg-surface flex flex-col custom-scrollbar overflow-y-auto p-gutter">
+
+<div class="mb-gutter">
+<h3 class="font-headline-lg text-headline-lg mb-unit-2 text-on-surface">Manage File</h3>
+<div id="dropzone" class="border-2 border-dashed border-outline-variant rounded-xl p-unit-6 text-center hover:bg-surface-variant transition-colors cursor-pointer group">
+<span class="material-symbols-outlined text-primary text-[40px] mb-2 group-hover:scale-110 transition-transform">cloud_upload</span>
+<p class="font-body-md text-on-surface">Drop new PDF/TXT here</p>
+<p class="font-label-sm text-on-surface-variant">atau klik untuk pilih file (maks 50MB)</p>
+</div>
+<input type="file" id="file-input" accept=".pdf,.txt" class="hidden"/>
+<input type="file" id="merge-input" accept=".pdf" multiple class="hidden"/>
+<button id="btn-export-pdf" class="btn-disabled w-full mt-unit-2 py-2.5 bg-primary text-on-primary rounded-lg font-medium flex items-center justify-center gap-2 hover:opacity-90 transition-opacity font-label-sm">
+<span class="material-symbols-outlined text-[18px]">export_notes</span> <span id="export-btn-label">Export PDF</span>
+</button>
+<p class="font-label-sm text-on-surface-variant text-center mt-1">Teks & tanda tangan baru permanen setelah Export. Anda akan diminta memilih lokasi penyimpanan (di browser Chrome/Edge).</p>
+</div>
+
+<!-- Selection Actions -->
+<div id="selection-panel" class="mb-gutter p-unit-4 bg-primary-container/20 rounded-xl border border-primary">
+<h3 class="font-label-sm uppercase tracking-widest text-on-surface-variant mb-unit-2">Selection Actions</h3>
+<p id="selection-summary" class="font-label-sm mb-unit-4">0 dipilih</p>
+<div class="flex flex-col gap-unit-2">
+<button id="btn-delete-selection" class="flex items-center gap-2 p-2 bg-surface-container-high rounded-lg hover:bg-error hover:text-on-error transition-all text-left font-label-sm">
+<span class="material-symbols-outlined text-[18px]">delete</span> Delete Semua Terpilih
+</button>
+<div class="flex gap-unit-2">
+<select id="blur-style" class="flex-1 bg-surface border border-outline-variant rounded-lg text-label-sm py-2 px-2">
+<option value="normal">Blur Ringan</option>
+<option value="strong">Blur Kuat</option>
+<option value="pixelate">Piksel (Kotak Kecil)</option>
+<option value="mosaic">Mosaik (Kotak Besar)</option>
+<option value="black">Blok Hitam Solid</option>
+<option value="noise">Acak (Noise)</option>
+</select>
+<button id="btn-blur-selection" class="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-sm hover:opacity-90">Blur</button>
+</div>
+<button id="btn-clear-selection" class="text-label-sm text-on-surface-variant hover:text-primary underline">Batalkan semua pilihan</button>
+</div>
+</div>
+
+<div class="mb-gutter">
+<h3 class="font-label-sm uppercase tracking-widest text-on-surface-variant mb-unit-4">Export & Convert</h3>
+<div class="flex gap-unit-2">
+<select id="convert-format" class="flex-1 bg-surface border border-outline-variant rounded-lg text-label-sm py-2 px-3">
+<option value="word">Word (.docx)</option>
+<option value="excel">Excel (.xlsx)</option>
+<option value="txt">Plain Text (.txt)</option>
+</select>
+<button id="btn-convert" class="btn-disabled bg-primary text-on-primary px-unit-6 py-2 rounded-lg font-label-sm hover:opacity-90">Convert</button>
+</div>
+<p class="font-label-sm text-on-surface-variant mt-1">Butuh lapisan teks di PDF (bukan hasil scan tanpa OCR).</p>
+</div>
+
+<div class="mb-gutter">
+<h3 class="font-label-sm uppercase tracking-widest text-on-surface-variant mb-unit-4">Advanced Workflow</h3>
+<div class="space-y-2">
+<button id="btn-merge" class="w-full flex justify-between items-center px-4 py-3 bg-surface-container-low border border-outline-variant rounded-lg hover:border-primary group transition-all">
+<div class="flex items-center gap-3"><span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary">call_merge</span><span class="font-label-sm">Merge Documents</span></div>
+<span class="material-symbols-outlined text-outline-variant">chevron_right</span>
+</button>
+<button id="btn-split" class="btn-disabled w-full flex justify-between items-center px-4 py-3 bg-surface-container-low border border-outline-variant rounded-lg hover:border-primary group transition-all">
+<div class="flex items-center gap-3"><span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary">call_split</span><span class="font-label-sm">Split Pages (dgn preview)</span></div>
+<span class="material-symbols-outlined text-outline-variant">chevron_right</span>
+</button>
+<button id="btn-compress" class="btn-disabled w-full flex justify-between items-center px-4 py-3 bg-surface-container-low border border-outline-variant rounded-lg hover:border-primary group transition-all">
+<div class="flex items-center gap-3"><span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary">compress</span><span class="font-label-sm">Optimize / Compress</span></div>
+<span class="material-symbols-outlined text-outline-variant">chevron_right</span>
+</button>
+</div>
+</div>
+
+</section>
+</main>
+
+<footer class="fixed bottom-0 w-full z-40 flex justify-between items-center px-4 md:px-margin-desktop h-10 bg-surface-container-highest border-t border-outline-variant overflow-hidden">
+<div class="flex items-center gap-3 md:gap-unit-6 text-on-secondary-fixed-variant overflow-hidden">
+<span class="font-label-sm truncate">File: <span class="font-medium" id="status-filename">-</span></span>
+<span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
+<span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
+</div>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 PDF Editor. Runs 100% locally — no database.</span>
+</footer>
+
+<div id="toast-container"></div>
+<div id="loading-overlay"><div class="spinner"></div></div>
+
+<!-- E-Sign Modal -->
+<div id="esign-modal">
+<div class="bg-white rounded-xl p-unit-6 pdf-page-shadow w-full max-w-[380px]">
+<h3 class="font-headline-lg text-headline-lg mb-unit-4 text-on-surface">Tambah Tanda Tangan</h3>
+<div class="flex gap-unit-2 mb-unit-4">
+<button id="esign-tab-draw" class="flex-1 py-2 rounded-lg font-label-sm tool-active">Gambar</button>
+<button id="esign-tab-upload" class="flex-1 py-2 rounded-lg font-label-sm bg-surface-container-high">Upload Gambar</button>
+</div>
+<div id="esign-panel-draw">
+<canvas id="esign-pad" width="332" height="140" class="border border-outline-variant rounded-lg bg-surface-container-lowest w-full"></canvas>
+<p class="font-label-sm text-on-surface-variant mt-2">Gambar tanda tangan pakai mouse atau jari (touch).</p>
+<button id="esign-clear" class="font-label-sm text-on-surface-variant underline mt-2">Hapus Gambar</button>
+</div>
+<div id="esign-panel-upload" class="hidden">
+<div id="esign-upload-dropzone" class="border-2 border-dashed border-outline-variant rounded-lg p-unit-6 text-center hover:bg-surface-variant cursor-pointer">
+<span class="material-symbols-outlined text-primary text-[32px]">upload_file</span>
+<p class="font-label-sm text-on-surface-variant mt-1">Klik untuk pilih gambar tanda tangan (PNG/JPG)</p>
+</div>
+<input type="file" id="esign-upload-input" accept="image/*" class="hidden"/>
+<img id="esign-upload-preview" class="hidden mt-unit-2 max-h-[100px] mx-auto"/>
+</div>
+<div class="flex justify-end gap-unit-2 mt-unit-4">
+<button id="esign-cancel" class="px-4 py-2 rounded-lg font-label-sm bg-surface-container-high">Batal</button>
+<button id="esign-confirm" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary">Gunakan</button>
+</div>
+</div>
+</div>
+
+<!-- Split Pages Modal (preview thumbnail + pemilihan interaktif) -->
+<div id="split-modal">
+<div class="bg-white rounded-xl p-unit-6 pdf-page-shadow w-full max-w-[640px] max-h-[85vh] flex flex-col">
+<div class="flex justify-between items-center mb-unit-4">
+<h3 class="font-headline-lg text-headline-lg text-on-surface">Pilih Halaman untuk Split</h3>
+<button id="split-select-all" class="font-label-sm text-primary underline">Pilih Semua</button>
+</div>
+<p id="split-summary" class="font-label-sm text-on-surface-variant mb-unit-4">0 halaman dipilih</p>
+<div id="split-thumbnails" class="grid grid-cols-3 sm:grid-cols-4 gap-3 overflow-y-auto custom-scrollbar flex-1 p-1"></div>
+<div class="flex justify-end gap-unit-2 mt-unit-4 pt-unit-4 border-t border-outline-variant">
+<button id="split-cancel" class="px-4 py-2 rounded-lg font-label-sm bg-surface-container-high">Batal</button>
+<button id="split-confirm" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary">Pisahkan & Unduh</button>
+</div>
+</div>
+</div>
+
+<script>
+(function () {
+  const API_BASE = '/api';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const FONT_CSS_MAP = {
+    Helvetica: 'Arial, Helvetica, sans-serif',
+    TimesRoman: "'Times New Roman', Times, serif",
+    Courier: "'Courier New', Courier, monospace",
+    Symbol: 'Symbol, sans-serif',
+    ZapfDingbats: 'sans-serif',
+  };
+
+  // ================== STATE ==================
+  const state = {
+    originalName: null,
+    fileSize: 0,
+    history: [],
+    historyIndex: -1,
+    pdfDoc: null,
+    numPages: 0,
+    scale: 1.5,
+    minScale: 0.5,
+    maxScale: 3,
+    activePageNum: 1,
+    pages: [],               // per halaman: {pageNum, wrapper, canvas, overlay, pdfPage, viewport, pageHeightPts, wordBoxes}
+    activeTool: 'default',   // 'default' | 'addtext' | 'esignplace'
+    wordDetectOn: false,
+    selectedAreas: [],       // {id, page(0-idx), x,y,width,height, wordIndex?}
+    draftSnipRect: null,
+    dragPageNum: null,
+    isDragging: false,
+    dragStart: null,
+    pendingSignature: null,
+    annotations: [],         // {id,type,page,xPt,yPt,...}
+    annotationIdCounter: 0,
+    activeTextAnnotationId: null, // annotation teks yg sedang menampilkan format bar
+  };
+
+  // ================== UI HELPERS ==================
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 4500);
+  }
+  function setLoading(v) { document.getElementById('loading-overlay').classList.toggle('active', v); }
+  function setEnabled(id, v) { document.getElementById(id).classList.toggle('btn-disabled', !v); }
+  function setBackendEditControlsEnabled(v) {
+    ['btn-convert', 'btn-split', 'btn-compress', 'btn-export-pdf', 'tool-esign'].forEach((id) => setEnabled(id, v));
+  }
+  function requireBackendFile() {
+    if (currentFilename()) return true;
+    showToast('Fitur ini butuh koneksi ke backend & file sudah ter-upload ke server.', 'error');
+    return false;
+  }
+  function currentFilename() { return state.history[state.historyIndex]; }
+  function setToolHint(text) {
+    const el = document.getElementById('tool-hint');
+    if (text) { el.textContent = text; el.classList.remove('hidden'); } else { el.classList.add('hidden'); }
+  }
+  function updatePendingHint() {
+    const el = document.getElementById('pending-hint');
+    const count = state.annotations.length;
+    const label = document.getElementById('export-btn-label');
+    if (count > 0) {
+      el.textContent = `${count} perubahan (teks/tanda tangan) belum permanen -- klik "Export PDF" utk menyimpan.`;
+      el.classList.remove('hidden');
+      label.textContent = `Export PDF (${count} pending)`;
+    } else {
+      el.classList.add('hidden');
+      label.textContent = 'Export PDF';
+    }
+  }
+
+  // ================== API HELPER ==================
+  async function apiFetch(path, options = {}) {
+    let res;
+    try { res = await fetch(`${API_BASE}${path}`, options); }
+    catch (err) { showToast('Tidak bisa terhubung ke backend.', 'error'); throw err; }
+    let body;
+    try { body = await res.json(); } catch (err) { showToast('Respons dari server tidak valid.', 'error'); throw err; }
+    if (!res.ok || body.status === 'error') {
+      showToast(body.message || `Terjadi kesalahan (HTTP ${res.status})`, 'error');
+      throw new Error(body.message || `HTTP ${res.status}`);
+    }
+    return body.data;
+  }
+
+  async function checkBackendHealth() {
+    const el = document.getElementById('connection-status');
+    try { await apiFetch('/health'); el.textContent = 'Backend: connected'; el.classList.add('text-primary'); }
+    catch (e) { el.textContent = 'Backend: offline'; el.classList.add('text-error'); }
+  }
+
+  // ================== DOWNLOAD (dengan opsi pilih folder via File System Access API) ==================
+  async function downloadFile(filename, suggestedName) {
+    try {
+      const res = await fetch(`${API_BASE}/download/${encodeURIComponent(filename)}`);
+      if (!res.ok) throw new Error('Gagal mengambil file dari server');
+      const blob = await res.blob();
+      const finalName = suggestedName || filename;
+
+      if (window.showSaveFilePicker) {
+        try {
+          const ext = finalName.includes('.') ? finalName.split('.').pop() : 'pdf';
+          const mime = blob.type || 'application/octet-stream';
+          const handle = await window.showSaveFilePicker({
+            suggestedName: finalName,
+            types: [{ description: 'File', accept: { [mime]: ['.' + ext] } }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          showToast('File berhasil disimpan di lokasi pilihan Anda.', 'success');
+          return;
+        } catch (pickErr) {
+          if (pickErr.name === 'AbortError') { showToast('Penyimpanan dibatalkan.', 'info'); return; }
+          console.warn('showSaveFilePicker gagal, fallback ke unduhan biasa:', pickErr.message);
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = finalName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      if (!window.showSaveFilePicker) {
+        showToast('File diunduh ke folder Downloads default (Chrome/Edge terbaru mendukung pilih folder).', 'info');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal mengunduh file: ' + err.message, 'error');
+    }
+  }
+
+  // ================== HISTORY (UNDO/REDO) ==================
+  function pushHistory(filename) {
+    state.history = state.history.slice(0, state.historyIndex + 1);
+    state.history.push(filename);
+    state.historyIndex = state.history.length - 1;
+    updateUndoRedoButtons();
+  }
+  function updateUndoRedoButtons() {
+    setEnabled('btn-undo', state.historyIndex > 0);
+    setEnabled('btn-redo', state.historyIndex < state.history.length - 1);
+  }
+  async function goToHistory(index) {
+    if (index < 0 || index >= state.history.length) return;
+    state.historyIndex = index;
+    updateUndoRedoButtons();
+    await loadPdfFromServer(currentFilename());
+  }
+
+  // ================== LOAD PDF (lokal / server) & RENDER SEMUA HALAMAN ==================
+  async function renderLocalPdf(arrayBuffer) {
+    setLoading(true);
+    try {
+      state.pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      await renderAllPages();
+    } catch (err) { console.error(err); showToast('Gagal merender PDF: ' + err.message, 'error'); }
+    finally { setLoading(false); }
+  }
+
+  async function loadPdfFromServer(filename) {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/download/${encodeURIComponent(filename)}`);
+      if (!res.ok) throw new Error('Gagal mengambil file dari server');
+      const arrayBuffer = await res.arrayBuffer();
+      state.pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      await renderAllPages();
+    } catch (err) { console.error(err); showToast('Gagal me-render PDF: ' + err.message, 'error'); }
+    finally { setLoading(false); }
+  }
+
+  let pageObserver = null;
+
+  async function renderAllPages() {
+    const container = document.getElementById('pages-container');
+    container.innerHTML = '';
+    state.pages = [];
+    state.numPages = state.pdfDoc.numPages;
+
+    for (let pageNum = 1; pageNum <= state.numPages; pageNum += 1) {
+      const page = await state.pdfDoc.getPage(pageNum); // eslint-disable-line no-await-in-loop
+      const viewport = page.getViewport({ scale: state.scale });
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'page-wrapper pdf-page-shadow';
+      wrapper.dataset.pageNum = String(pageNum);
+      wrapper.style.width = viewport.width + 'px';
+      wrapper.style.height = viewport.height + 'px';
+
+      const label = document.createElement('div');
+      label.className = 'page-number-label font-label-sm text-on-surface-variant';
+      label.textContent = `Halaman ${pageNum}`;
+      wrapper.appendChild(label);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      wrapper.appendChild(canvas);
+
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay-layer';
+      wrapper.appendChild(overlay);
+
+      container.appendChild(wrapper);
+
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise; // eslint-disable-line no-await-in-loop
+
+      state.pages.push({
+        pageNum, wrapper, canvas, overlay, pdfPage: page, viewport,
+        pageHeightPts: page.view[3], wordBoxes: [],
+      });
+    }
+
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('status-pages').textContent = state.numPages;
+    setEnabled('btn-zoom-in', true);
+    setEnabled('btn-zoom-out', true);
+    updateZoomIndicator();
+    setupPageObserver();
+
+    if (state.wordDetectOn) {
+      for (const p of state.pages) await computeWordBoxesForPage(p); // eslint-disable-line no-await-in-loop
+    }
+    renderAllOverlays();
+  }
+
+  function setupPageObserver() {
+    if (pageObserver) pageObserver.disconnect();
+    pageObserver = new IntersectionObserver((entries) => {
+      let best = null;
+      entries.forEach((entry) => {
+        if (entry.isIntersecting && (!best || entry.intersectionRatio > best.intersectionRatio)) best = entry;
+      });
+      if (best) {
+        state.activePageNum = parseInt(best.target.dataset.pageNum, 10);
+        document.getElementById('page-indicator').textContent = `Halaman ${state.activePageNum} / ${state.numPages}`;
+      }
+    }, { root: document.getElementById('left-section'), threshold: [0.3, 0.5, 0.7] });
+    state.pages.forEach((p) => pageObserver.observe(p.wrapper));
+  }
+
+  async function computeWordBoxesForPage(pageInfo) {
+    const textContent = await pageInfo.pdfPage.getTextContent();
+    const boxes = [];
+    let globalIndex = 0;
+    textContent.items.forEach((item) => {
+      if (!item.str || !item.str.trim()) return;
+      const tx = pdfjsLib.Util.transform(pageInfo.viewport.transform, item.transform);
+      const itemHeight = Math.hypot(tx[2], tx[3]);
+      const itemWidth = item.width * state.scale;
+      const itemX = tx[4];
+      const itemY = tx[5] - itemHeight;
+      const words = item.str.split(/(\s+)/).filter((w) => w.length > 0);
+      const totalChars = item.str.length || 1;
+      let charOffset = 0;
+      words.forEach((chunk) => {
+        const chunkWidth = (chunk.length / totalChars) * itemWidth;
+        if (chunk.trim().length > 0) {
+          boxes.push({ index: globalIndex++, text: chunk, x: itemX + (charOffset / totalChars) * itemWidth, y: itemY, width: chunkWidth, height: itemHeight });
+        }
+        charOffset += chunk.length;
+      });
+    });
+    pageInfo.wordBoxes = boxes;
+  }
+
+  function updateZoomIndicator() { document.getElementById('zoom-indicator').textContent = `${Math.round((state.scale / 1.5) * 100)}%`; }
+
+  // ================== KONVERSI KOORDINAT (per halaman) ==================
+  function canvasPosToPdfPoint(pageInfo, canvasX, canvasY) {
+    return { x: canvasX / state.scale, y: pageInfo.pageHeightPts - (canvasY / state.scale) };
+  }
+  function pdfPointToCanvasPos(pageInfo, xPt, yPt) {
+    return { x: xPt * state.scale, y: (pageInfo.pageHeightPts - yPt) * state.scale };
+  }
+  function canvasRectToPdfRect(pageInfo, rect) {
+    const x = rect.x / state.scale;
+    const width = rect.width / state.scale;
+    const height = rect.height / state.scale;
+    const y = pageInfo.pageHeightPts - (rect.y + rect.height) / state.scale;
+    return { x, y, width, height };
+  }
+  function pdfRectToCanvasRect(pageInfo, pdfRect) {
+    const width = pdfRect.width * state.scale;
+    const height = pdfRect.height * state.scale;
+    const x = pdfRect.x * state.scale;
+    const y = (pageInfo.pageHeightPts - pdfRect.y) * state.scale - height;
+    return { x, y, width, height };
+  }
+  function getPageInfo(pageNum) { return state.pages.find((p) => p.pageNum === pageNum) || null; }
+
+  // ================== TOGGLE: DETEKSI KATA ==================
+  document.getElementById('toggle-detect-words').addEventListener('click', async () => {
+    state.wordDetectOn = !state.wordDetectOn;
+    document.getElementById('toggle-detect-words').classList.toggle('tool-active', state.wordDetectOn);
+    setEnabled('btn-select-all', state.wordDetectOn);
+
+    if (state.wordDetectOn) {
+      setLoading(true);
+      try { for (const p of state.pages) await computeWordBoxesForPage(p); } // eslint-disable-line no-await-in-loop
+      finally { setLoading(false); }
+    } else {
+      state.pages.forEach((p) => { p.wordBoxes = []; });
+    }
+    renderAllOverlays();
+  });
+
+  document.getElementById('btn-select-all').addEventListener('click', () => {
+    if (!state.wordDetectOn) return showToast('Aktifkan "Deteksi Kata" dulu.', 'info');
+    const pageInfo = getPageInfo(state.activePageNum);
+    if (!pageInfo || !pageInfo.wordBoxes.length) return showToast('Tidak ada kata terdeteksi di halaman aktif.', 'info');
+    pageInfo.wordBoxes.forEach((wb) => {
+      if (!state.selectedAreas.some((a) => a.wordIndex === wb.index && a.page === pageInfo.pageNum - 1)) {
+        state.selectedAreas.push({ id: 'w' + pageInfo.pageNum + '-' + wb.index, page: pageInfo.pageNum - 1, wordIndex: wb.index, x: wb.x, y: wb.y, width: wb.width, height: wb.height });
+      }
+    });
+    renderAllOverlays();
+    showToast(`Semua kata di Halaman ${pageInfo.pageNum} dipilih.`, 'success');
+  });
+
+  // ================== OVERLAY RENDERING (per halaman) ==================
+  function renderAllOverlays() { state.pages.forEach((p) => renderPageOverlay(p)); updateSelectionPanel(); updatePendingHint(); }
+
+  function renderPageOverlay(pageInfo) {
+    const overlay = pageInfo.overlay;
+    overlay.innerHTML = '';
+    const pageIdx = pageInfo.pageNum - 1;
+
+    if (state.wordDetectOn) {
+      pageInfo.wordBoxes.forEach((wb) => {
+        const selected = state.selectedAreas.some((a) => a.wordIndex === wb.index && a.page === pageIdx);
+        const div = document.createElement('div');
+        div.className = 'word-box' + (selected ? ' selected' : '');
+        div.style.left = wb.x + 'px'; div.style.top = wb.y + 'px';
+        div.style.width = wb.width + 'px'; div.style.height = wb.height + 'px';
+        div.title = wb.text;
+        div.addEventListener('click', (e) => { e.stopPropagation(); toggleWordSelection(pageIdx, wb); });
+        overlay.appendChild(div);
+      });
+    }
+
+    state.selectedAreas.filter((a) => a.page === pageIdx && a.wordIndex === undefined).forEach((a) => {
+      const div = document.createElement('div');
+      div.className = 'snip-box';
+      div.style.left = a.x + 'px'; div.style.top = a.y + 'px';
+      div.style.width = a.width + 'px'; div.style.height = a.height + 'px';
+      overlay.appendChild(div);
+    });
+
+    if (state.draftSnipRect && state.dragPageNum === pageInfo.pageNum) {
+      const div = document.createElement('div');
+      div.className = 'snip-box';
+      div.style.left = state.draftSnipRect.x + 'px'; div.style.top = state.draftSnipRect.y + 'px';
+      div.style.width = state.draftSnipRect.width + 'px'; div.style.height = state.draftSnipRect.height + 'px';
+      overlay.appendChild(div);
+    }
+
+    renderAnnotationsForPage(pageInfo);
+  }
+
+  function toggleWordSelection(pageIdx, wb) {
+    const idx = state.selectedAreas.findIndex((a) => a.wordIndex === wb.index && a.page === pageIdx);
+    if (idx >= 0) state.selectedAreas.splice(idx, 1);
+    else state.selectedAreas.push({ id: 'w' + pageIdx + '-' + wb.index, page: pageIdx, wordIndex: wb.index, x: wb.x, y: wb.y, width: wb.width, height: wb.height });
+    renderAllOverlays();
+  }
+
+  function clearSelection() { state.selectedAreas = []; state.draftSnipRect = null; renderAllOverlays(); }
+
+  function updateSelectionPanel() {
+    const panel = document.getElementById('selection-panel');
+    const summary = document.getElementById('selection-summary');
+    const total = state.selectedAreas.length;
+    panel.classList.remove('hidden'); // selalu tampil, tidak lagi disembunyikan
+
+    if (total > 0) {
+      const wordCount = state.selectedAreas.filter((a) => a.wordIndex !== undefined).length;
+      const manualCount = total - wordCount;
+      const parts = [];
+      if (wordCount) parts.push(`${wordCount} kata`);
+      if (manualCount) parts.push(`${manualCount} area manual`);
+      summary.textContent = `${parts.join(' + ')} dipilih (${total} total, lintas halaman)`;
+    } else {
+      summary.textContent = 'Belum ada yang dipilih. Aktifkan "Deteksi Kata" lalu klik kata, atau drag langsung di halaman untuk menyeleksi area manual.';
+    }
+    setEnabled('btn-delete-selection', total > 0);
+    setEnabled('btn-blur-selection', total > 0);
+  }
+
+  // ================== ANNOTATION LAYER (Add Text & E-Sign) ==================
+  function renderAnnotationsForPage(pageInfo) {
+    const pageIdx = pageInfo.pageNum - 1;
+    state.annotations.filter((a) => a.page === pageIdx).forEach((ann) => {
+      if (ann.type === 'text') renderTextAnnotation(pageInfo, ann);
+      else if (ann.type === 'signature') renderSignatureAnnotation(pageInfo, ann);
+    });
+  }
+
+  function removeAnnotation(id) {
+    state.annotations = state.annotations.filter((a) => a.id !== id);
+    if (state.activeTextAnnotationId === id) { state.activeTextAnnotationId = null; hideFormatBar(); }
+    renderAllOverlays();
+  }
+
+  function makeDraggable(handleEl, boxEl, onCommit) {
+    let dragging = false, startClientX = 0, startClientY = 0, startLeft = 0, startTop = 0;
+    handleEl.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      dragging = true;
+      startClientX = e.clientX; startClientY = e.clientY;
+      startLeft = parseFloat(boxEl.style.left) || 0; startTop = parseFloat(boxEl.style.top) || 0;
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+    });
+    function onMove(e) {
+      if (!dragging) return;
+      boxEl.style.left = (startLeft + (e.clientX - startClientX)) + 'px';
+      boxEl.style.top = (startTop + (e.clientY - startClientY)) + 'px';
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+      onCommit(parseFloat(boxEl.style.left), parseFloat(boxEl.style.top));
+    }
+  }
+  function makeResizable(handleEl, boxEl, onCommit) {
+    let resizing = false, startClientX = 0, startClientY = 0, startW = 0, startH = 0;
+    handleEl.addEventListener('mousedown', (e) => {
+      e.stopPropagation(); resizing = true;
+      startClientX = e.clientX; startClientY = e.clientY;
+      startW = boxEl.offsetWidth; startH = boxEl.offsetHeight;
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+    });
+    function onMove(e) {
+      if (!resizing) return;
+      boxEl.style.width = Math.max(30, startW + (e.clientX - startClientX)) + 'px';
+      boxEl.style.height = Math.max(15, startH + (e.clientY - startClientY)) + 'px';
+    }
+    function onUp() {
+      if (!resizing) return;
+      resizing = false;
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+      onCommit(boxEl.offsetWidth, boxEl.offsetHeight);
+    }
+  }
+
+  // ---- Komposisi teks list (numbering/bullet/multilevel) ----
+  function composeListText(rawText, listType) {
+    const lines = rawText.split('\n');
+    if (listType === 'bulleted') {
+      return lines.map((l) => (l.trim() ? '• ' + l.replace(/^\t+/, '') : l)).join('\n');
+    }
+    if (listType === 'numbered') {
+      let n = 0;
+      return lines.map((l) => { if (!l.trim()) return l; n += 1; return `${n}. ${l.replace(/^\t+/, '')}`; }).join('\n');
+    }
+    if (listType === 'multilevel') {
+      const counters = [0, 0, 0, 0, 0];
+      return lines.map((l) => {
+        if (!l.trim()) return l;
+        const level = Math.min((l.match(/^\t*/)[0] || '').length, counters.length - 1);
+        counters[level] += 1;
+        for (let i = level + 1; i < counters.length; i += 1) counters[i] = 0;
+        const label = counters.slice(0, level + 1).join('.') + '.';
+        return `${'    '.repeat(level)}${label} ${l.replace(/^\t+/, '')}`;
+      }).join('\n');
+    }
+    return rawText;
+  }
+
+  function textAnnotationDisplayStyle(ann) {
+    return `font-family:${FONT_CSS_MAP[ann.fontFamily] || FONT_CSS_MAP.Helvetica}; font-size:${ann.fontSize}px; `
+      + `font-weight:${ann.bold ? '700' : '400'}; font-style:${ann.italic ? 'italic' : 'normal'}; `
+      + `text-decoration:${ann.underline ? 'underline' : 'none'}; color:${ann.color};`;
+  }
+
+  function renderTextAnnotation(pageInfo, ann) {
+    const pos = pdfPointToCanvasPos(pageInfo, ann.xPt, ann.yPt);
+    const box = document.createElement('div');
+    box.className = 'annotation-box';
+    box.style.left = pos.x + 'px'; box.style.top = pos.y + 'px'; box.style.width = 'auto';
+
+    const handle = document.createElement('span');
+    handle.className = 'material-symbols-outlined ann-handle text-primary text-[15px]';
+    handle.textContent = 'drag_indicator';
+    box.appendChild(handle);
+
+    const delBtn = document.createElement('span');
+    delBtn.className = 'material-symbols-outlined ann-delete text-[15px]';
+    delBtn.textContent = 'close';
+    delBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeAnnotation(ann.id); });
+    box.appendChild(delBtn);
+
+    const textEl = document.createElement('div');
+    textEl.className = 'annotation-text-content';
+    textEl.setAttribute('style', textAnnotationDisplayStyle(ann));
+    const preview = composeListText(ann.text || '', ann.listType);
+    textEl.textContent = preview.trim() ? preview : '(kosong -- klik dua kali utk isi)';
+    textEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startEditingText(pageInfo, ann, box, textEl); });
+    box.appendChild(textEl);
+
+    box.addEventListener('mousedown', (e) => { if (e.target === handle) return; e.stopPropagation(); showFormatBarFor(ann, () => { textEl.setAttribute('style', textAnnotationDisplayStyle(ann)); const p2 = composeListText(ann.text || '', ann.listType); textEl.textContent = p2.trim() ? p2 : '(kosong -- klik dua kali utk isi)'; }); });
+    pageInfo.overlay.appendChild(box);
+
+    makeDraggable(handle, box, (left, top) => {
+      const pdfPos = canvasPosToPdfPoint(pageInfo, left, top);
+      ann.xPt = pdfPos.x; ann.yPt = pdfPos.y;
+    });
+
+    if (ann._justCreated) { ann._justCreated = false; startEditingText(pageInfo, ann, box, textEl); }
+  }
+
+  function startEditingText(pageInfo, ann, box, textEl) {
+    const textarea = document.createElement('textarea');
+    textarea.value = ann.text;
+    textarea.rows = 2;
+    textarea.setAttribute('style', textAnnotationDisplayStyle(ann) + ' border:none; outline:none; background:transparent; resize:none; min-width:140px; padding:2px 20px;');
+    textEl.replaceWith(textarea);
+    textarea.focus(); textarea.select();
+    showFormatBarFor(ann, () => textarea.setAttribute('style', textAnnotationDisplayStyle(ann) + ' border:none; outline:none; background:transparent; resize:none; min-width:140px; padding:2px 20px;'));
+
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = textarea.selectionStart;
+        const value = textarea.value;
+        const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+        textarea.value = value.slice(0, lineStart) + '\t' + value.slice(lineStart);
+        textarea.selectionStart = textarea.selectionEnd = start + 1;
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault(); textarea.blur();
+      }
+    });
+    textarea.addEventListener('mousedown', (e) => e.stopPropagation());
+    textarea.addEventListener('blur', () => {
+      ann.text = textarea.value;
+      renderAllOverlays();
+    });
+  }
+
+  function renderSignatureAnnotation(pageInfo, ann) {
+    const rect = pdfRectToCanvasRect(pageInfo, { x: ann.xPt, y: ann.yPt, width: ann.widthPt, height: ann.heightPt });
+    const box = document.createElement('div');
+    box.className = 'annotation-box';
+    box.style.left = rect.x + 'px'; box.style.top = rect.y + 'px'; box.style.width = rect.width + 'px'; box.style.height = rect.height + 'px';
+
+    const img = document.createElement('img');
+    img.src = ann.imageBase64;
+    box.appendChild(img);
+
+    const handle = document.createElement('span');
+    handle.className = 'material-symbols-outlined ann-handle text-primary text-[15px]';
+    handle.textContent = 'drag_indicator';
+    box.appendChild(handle);
+
+    const delBtn = document.createElement('span');
+    delBtn.className = 'material-symbols-outlined ann-delete text-[15px]';
+    delBtn.textContent = 'close';
+    delBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeAnnotation(ann.id); });
+    box.appendChild(delBtn);
+
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'ann-resize';
+    box.appendChild(resizeHandle);
+
+    box.addEventListener('mousedown', (e) => { if (e.target === handle || e.target === resizeHandle) return; e.stopPropagation(); });
+    pageInfo.overlay.appendChild(box);
+
+    makeDraggable(handle, box, (left, top) => {
+      const pdfRect = canvasRectToPdfRect(pageInfo, { x: left, y: top, width: box.offsetWidth, height: box.offsetHeight });
+      ann.xPt = pdfRect.x; ann.yPt = pdfRect.y;
+    });
+    makeResizable(resizeHandle, box, (w, h) => {
+      const left = parseFloat(box.style.left); const top = parseFloat(box.style.top);
+      const pdfRect = canvasRectToPdfRect(pageInfo, { x: left, y: top, width: w, height: h });
+      ann.xPt = pdfRect.x; ann.yPt = pdfRect.y; ann.widthPt = pdfRect.width; ann.heightPt = pdfRect.height;
+    });
+  }
+
+  function addTextAnnotationAt(pageInfo, canvasX, canvasY) {
+    const pdfPos = canvasPosToPdfPoint(pageInfo, canvasX, canvasY);
+    const ann = {
+      id: 'ann' + (++state.annotationIdCounter), type: 'text', page: pageInfo.pageNum - 1,
+      xPt: pdfPos.x, yPt: pdfPos.y, text: '', fontSize: 14, fontFamily: 'Helvetica',
+      bold: false, italic: false, underline: false, listType: 'none', color: '#1b1c1a',
+      _justCreated: true,
+    };
+    state.annotations.push(ann);
+    renderAllOverlays();
+  }
+
+  function addSignatureAnnotationAt(pageInfo, canvasX, canvasY) {
+    const pdfRect = canvasRectToPdfRect(pageInfo, { x: canvasX, y: canvasY, width: 160, height: 60 });
+    const ann = {
+      id: 'ann' + (++state.annotationIdCounter), type: 'signature', page: pageInfo.pageNum - 1,
+      xPt: pdfRect.x, yPt: pdfRect.y, widthPt: pdfRect.width, heightPt: pdfRect.height, imageBase64: state.pendingSignature,
+    };
+    state.annotations.push(ann);
+    state.activeTool = 'default'; setToolHint(null);
+    renderAllOverlays();
+    showToast('Tanda tangan ditempatkan. Bisa digeser/resize kapan saja sebelum Export.', 'success');
+  }
+
+  // ---- Format bar (font/bold/italic/underline/list/warna) ----
+  function showFormatBarFor(ann, onChangeApplied) {
+    state.activeTextAnnotationId = ann.id;
+    const bar = document.getElementById('text-format-bar');
+    bar.classList.remove('hidden'); bar.classList.add('flex');
+    document.getElementById('fmt-font-family').value = ann.fontFamily;
+    document.getElementById('fmt-font-size').value = ann.fontSize;
+    document.getElementById('fmt-bold').classList.toggle('tool-active', ann.bold);
+    document.getElementById('fmt-italic').classList.toggle('tool-active', ann.italic);
+    document.getElementById('fmt-underline').classList.toggle('tool-active', ann.underline);
+    document.getElementById('fmt-list-type').value = ann.listType;
+    document.getElementById('fmt-color').value = ann.color;
+    bar._onChangeApplied = onChangeApplied;
+  }
+  function hideFormatBar() {
+    document.getElementById('text-format-bar').classList.add('hidden');
+    document.getElementById('text-format-bar').classList.remove('flex');
+  }
+  function currentActiveAnnotation() { return state.annotations.find((a) => a.id === state.activeTextAnnotationId) || null; }
+  function applyFormatChange() {
+    const ann = currentActiveAnnotation();
+    if (!ann) return;
+    ann.fontFamily = document.getElementById('fmt-font-family').value;
+    ann.fontSize = Number(document.getElementById('fmt-font-size').value) || 14;
+    ann.listType = document.getElementById('fmt-list-type').value;
+    ann.color = document.getElementById('fmt-color').value;
+    renderAllOverlays();
+  }
+  document.getElementById('fmt-font-family').addEventListener('change', applyFormatChange);
+  document.getElementById('fmt-font-size').addEventListener('change', applyFormatChange);
+  document.getElementById('fmt-list-type').addEventListener('change', applyFormatChange);
+  document.getElementById('fmt-color').addEventListener('input', applyFormatChange);
+  document.getElementById('fmt-bold').addEventListener('click', () => { const ann = currentActiveAnnotation(); if (!ann) return; ann.bold = !ann.bold; document.getElementById('fmt-bold').classList.toggle('tool-active', ann.bold); renderAllOverlays(); });
+  document.getElementById('fmt-italic').addEventListener('click', () => { const ann = currentActiveAnnotation(); if (!ann) return; ann.italic = !ann.italic; document.getElementById('fmt-italic').classList.toggle('tool-active', ann.italic); renderAllOverlays(); });
+  document.getElementById('fmt-underline').addEventListener('click', () => { const ann = currentActiveAnnotation(); if (!ann) return; ann.underline = !ann.underline; document.getElementById('fmt-underline').classList.toggle('tool-active', ann.underline); renderAllOverlays(); });
+
+  // ================== INTERAKSI (event delegation di #pages-container) ==================
+  const pagesContainer = document.getElementById('pages-container');
+
+  function resolvePageFromTarget(target) {
+    const wrapper = target.closest ? target.closest('.page-wrapper') : null;
+    if (!wrapper) return null;
+    return getPageInfo(parseInt(wrapper.dataset.pageNum, 10));
+  }
+  function getPos(pageInfo, e) {
+    const rect = pageInfo.overlay.getBoundingClientRect();
+    const point = e.touches ? e.touches[0] : e;
+    return { x: point.clientX - rect.left, y: point.clientY - rect.top };
+  }
+
+  pagesContainer.addEventListener('mousedown', (e) => {
+    const pageInfo = resolvePageFromTarget(e.target);
+    if (!pageInfo || e.target !== pageInfo.overlay) return;
+    if (state.activeTool !== 'default') return;
+    const { x: startX, y: startY } = getPos(pageInfo, e);
+    state.isDragging = true;
+    state.dragPageNum = pageInfo.pageNum;
+    state.dragStart = { x: startX, y: startY };
+    state.draftSnipRect = { x: startX, y: startY, width: 0, height: 0 };
+    renderPageOverlay(pageInfo);
+  });
+
+  pagesContainer.addEventListener('mousemove', (e) => {
+    if (!state.isDragging) return;
+    const pageInfo = getPageInfo(state.dragPageNum);
+    if (!pageInfo) return;
+    const { x: curX, y: curY } = getPos(pageInfo, e);
+    const x = Math.min(state.dragStart.x, curX);
+    const y = Math.min(state.dragStart.y, curY);
+    state.draftSnipRect = { x, y, width: Math.abs(curX - state.dragStart.x), height: Math.abs(curY - state.dragStart.y) };
+    renderPageOverlay(pageInfo);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!state.isDragging) return;
+    state.isDragging = false;
+    const d = state.draftSnipRect;
+    if (d && d.width >= 4 && d.height >= 4 && state.dragPageNum) {
+      state.selectedAreas.push({ id: 's' + Date.now() + Math.random().toString(36).slice(2), page: state.dragPageNum - 1, ...d });
+
+} else {
+      state.selectedAreas = [];
+    }
+    state.draftSnipRect = null;
+    state.dragPageNum = null;
+    renderAllOverlays();
+  });
+
+  pagesContainer.addEventListener('click', (e) => {
+    const pageInfo = resolvePageFromTarget(e.target);
+    if (!pageInfo || e.target !== pageInfo.overlay) return;
+    const { x, y } = getPos(pageInfo, e);
+    if (state.activeTool === 'addtext') { addTextAnnotationAt(pageInfo, x, y); return; }
+    if (state.activeTool === 'esignplace') { addSignatureAnnotationAt(pageInfo, x, y); return; }
+    // CATATAN: pembatalan seleksi ("klik area kosong = clear") SUDAH ditangani
+    // di handler mouseup (lihat di atas) berdasarkan jarak drag. Jangan panggil
+    // clearSelection() lagi di sini -- 'click' selalu ikut terpicu tepat setelah
+    // drag selesai (perilaku standar browser), jadi kalau dipanggil di sini,
+    // seleksi hasil drag yang baru saja dibuat akan langsung terhapus lagi.
+    state.activeTextAnnotationId = null;
+    hideFormatBar();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (state.activeTool !== 'default') {
+      state.activeTool = 'default';
+      document.getElementById('tool-addtext').classList.remove('tool-active');
+      setToolHint(null);
+    }
+  });
+
+  document.getElementById('tool-addtext').addEventListener('click', () => {
+    const next = state.activeTool === 'addtext' ? 'default' : 'addtext';
+    state.activeTool = next;
+    document.getElementById('tool-addtext').classList.toggle('tool-active', next === 'addtext');
+    setToolHint(next === 'addtext' ? 'Klik di halaman manapun utk membuat teks baru. Tetap bisa digeser/dihapus sampai Export.' : null);
+  });
+
+  // ================== PROSES GAMBAR UTK BLUR/SNIP ==================
+  function cropCanvasRegion(pageInfo, rect) {
+    const crop = document.createElement('canvas');
+    crop.width = Math.max(1, Math.round(rect.width));
+    crop.height = Math.max(1, Math.round(rect.height));
+    crop.getContext('2d').drawImage(pageInfo.canvas, rect.x, rect.y, rect.width, rect.height, 0, 0, crop.width, crop.height);
+    return crop;
+  }
+  function applyGaussianBlur(src, px) { const out = document.createElement('canvas'); out.width = src.width; out.height = src.height; const ctx = out.getContext('2d'); ctx.filter = `blur(${px}px)`; ctx.drawImage(src, 0, 0); return out; }
+  function applyPixelate(src, scaleDown) {
+    const small = document.createElement('canvas');
+    small.width = Math.max(1, Math.round(src.width * scaleDown)); small.height = Math.max(1, Math.round(src.height * scaleDown));
+    small.getContext('2d').drawImage(src, 0, 0, small.width, small.height);
+    const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
+    const ctx = out.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(small, 0, 0, out.width, out.height);
+    return out;
+  }
+  function applySolidBlack(src) { const out = document.createElement('canvas'); out.width = src.width; out.height = src.height; const ctx = out.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, out.width, out.height); return out; }
+  function applyNoise(src) {
+    const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
+    const ctx = out.getContext('2d'); const imgData = ctx.createImageData(out.width, out.height);
+    for (let i = 0; i < imgData.data.length; i += 4) { const v = Math.floor(Math.random() * 255); imgData.data[i] = v; imgData.data[i + 1] = v; imgData.data[i + 2] = v; imgData.data[i + 3] = 255; }
+    ctx.putImageData(imgData, 0, 0); return out;
+  }
+  function processBlurStyle(cropped, style) {
+    switch (style) {
+      case 'strong': return applyGaussianBlur(cropped, 14);
+      case 'pixelate': return applyPixelate(cropped, 0.12);
+      case 'mosaic': return applyPixelate(cropped, 0.04);
+      case 'black': return applySolidBlack(cropped);
+      case 'noise': return applyNoise(cropped);
+      default: return applyGaussianBlur(cropped, 4);
+    }
+  }
+
+  // ================== AKSI: DELETE (lintas halaman sekaligus) ==================
+  document.getElementById('btn-delete-selection').addEventListener('click', async () => {
+    if (!state.selectedAreas.length) return;
+    if (!requireBackendFile()) return;
+    setLoading(true);
+    try {
+      const areas = state.selectedAreas.map((a) => {
+        const pageInfo = getPageInfo(a.page + 1);
+        return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), color: '#ffffff' };
+      });
+      const data = await apiFetch('/blur-area', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), areas }) });
+      pushHistory(data.filename);
+      await loadPdfFromServer(data.filename);
+      showToast(`${areas.length} area terpilih berhasil dihapus.`, 'success');
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  // ================== AKSI: BLUR (lintas halaman sekaligus) ==================
+  document.getElementById('btn-blur-selection').addEventListener('click', async () => {
+    if (!state.selectedAreas.length) return;
+    if (!requireBackendFile()) return;
+    const style = document.getElementById('blur-style').value;
+    setLoading(true);
+    try {
+      const patches = state.selectedAreas.map((a) => {
+        const pageInfo = getPageInfo(a.page + 1);
+        const cropped = cropCanvasRegion(pageInfo, a);
+        const processed = processBlurStyle(cropped, style);
+        return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), imageBase64: processed.toDataURL('image/png') };
+      });
+      const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), patches }) });
+      pushHistory(data.filename);
+      await loadPdfFromServer(data.filename);
+      showToast(`${patches.length} area terpilih berhasil di-blur.`, 'success');
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  document.getElementById('btn-clear-selection').addEventListener('click', clearSelection);
+  document.getElementById('btn-undo').addEventListener('click', () => goToHistory(state.historyIndex - 1));
+  document.getElementById('btn-redo').addEventListener('click', () => goToHistory(state.historyIndex + 1));
+
+  // ================== ZOOM (render ulang semua halaman, pertahankan posisi scroll) ==================
+  async function setZoom(newScale) {
+    const clamped = Math.min(state.maxScale, Math.max(state.minScale, newScale));
+    if (clamped === state.scale) return;
+    state.scale = clamped;
+    updateZoomIndicator();
+    const activePageNum = state.activePageNum;
+    await renderAllPages();
+    const target = getPageInfo(activePageNum);
+    if (target) target.wrapper.scrollIntoView({ block: 'start' });
+  }
+  document.getElementById('btn-zoom-in').addEventListener('click', () => setZoom(state.scale + 0.25));
+  document.getElementById('btn-zoom-out').addEventListener('click', () => setZoom(state.scale - 0.25));
+
+  // ================== E-SIGN ==================
+  const esignCanvas = document.getElementById('esign-pad');
+  const esignCtx = esignCanvas.getContext('2d');
+  esignCtx.lineWidth = 2.5; esignCtx.lineCap = 'round'; esignCtx.strokeStyle = '#1b1c1a';
+  let esignDrawing = false, esignLastPt = null, esignHasContent = false, esignActiveTab = 'draw', uploadedSignatureDataUrl = null;
+
+  function esignPos(e) {
+    const rect = esignCanvas.getBoundingClientRect();
+    const scaleX = esignCanvas.width / rect.width; const scaleY = esignCanvas.height / rect.height;
+    const point = e.touches ? e.touches[0] : e;
+    return { x: (point.clientX - rect.left) * scaleX, y: (point.clientY - rect.top) * scaleY };
+  }
+  function esignStart(e) { esignDrawing = true; esignLastPt = esignPos(e); e.preventDefault(); }
+  function esignMove(e) { if (!esignDrawing) return; const p = esignPos(e); esignCtx.beginPath(); esignCtx.moveTo(esignLastPt.x, esignLastPt.y); esignCtx.lineTo(p.x, p.y); esignCtx.stroke(); esignLastPt = p; esignHasContent = true; e.preventDefault(); }
+  function esignEnd() { esignDrawing = false; }
+  esignCanvas.addEventListener('mousedown', esignStart);
+  esignCanvas.addEventListener('mousemove', esignMove);
+  window.addEventListener('mouseup', esignEnd);
+  esignCanvas.addEventListener('touchstart', esignStart);
+  esignCanvas.addEventListener('touchmove', esignMove);
+  esignCanvas.addEventListener('touchend', esignEnd);
+  document.getElementById('esign-clear').addEventListener('click', () => { esignCtx.clearRect(0, 0, esignCanvas.width, esignCanvas.height); esignHasContent = false; });
+
+  function switchEsignTab(tab) {
+    esignActiveTab = tab;
+    document.getElementById('esign-tab-draw').classList.toggle('tool-active', tab === 'draw');
+    document.getElementById('esign-tab-upload').classList.toggle('tool-active', tab === 'upload');
+    document.getElementById('esign-tab-draw').classList.toggle('bg-surface-container-high', tab !== 'draw');
+    document.getElementById('esign-tab-upload').classList.toggle('bg-surface-container-high', tab !== 'upload');
+    document.getElementById('esign-panel-draw').classList.toggle('hidden', tab !== 'draw');
+    document.getElementById('esign-panel-upload').classList.toggle('hidden', tab !== 'upload');
+  }
+  document.getElementById('esign-tab-draw').addEventListener('click', () => switchEsignTab('draw'));
+  document.getElementById('esign-tab-upload').addEventListener('click', () => switchEsignTab('upload'));
+  document.getElementById('esign-upload-dropzone').addEventListener('click', () => document.getElementById('esign-upload-input').click());
+  document.getElementById('esign-upload-input').addEventListener('change', (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { uploadedSignatureDataUrl = reader.result; const img = document.getElementById('esign-upload-preview'); img.src = uploadedSignatureDataUrl; img.classList.remove('hidden'); };
+    reader.readAsDataURL(file);
+  });
+  document.getElementById('tool-esign').addEventListener('click', () => {
+    if (!requireBackendFile()) return;
+    esignCtx.clearRect(0, 0, esignCanvas.width, esignCanvas.height);
+    esignHasContent = false; uploadedSignatureDataUrl = null;
+    document.getElementById('esign-upload-preview').classList.add('hidden');
+    document.getElementById('esign-upload-input').value = '';
+    switchEsignTab('draw');
+    document.getElementById('esign-modal').classList.add('active');
+  });
+  document.getElementById('esign-cancel').addEventListener('click', () => document.getElementById('esign-modal').classList.remove('active'));
+  document.getElementById('esign-confirm').addEventListener('click', () => {
+    let signatureData = null;
+    if (esignActiveTab === 'draw') {
+      if (!esignHasContent) return showToast('Gambar tanda tangan dulu, atau pindah ke tab "Upload Gambar".', 'info');
+      signatureData = esignCanvas.toDataURL('image/png');
+    } else {
+      if (!uploadedSignatureDataUrl) return showToast('Pilih gambar tanda tangan dulu.', 'info');
+      signatureData = uploadedSignatureDataUrl;
+    }
+    state.pendingSignature = signatureData;
+    document.getElementById('esign-modal').classList.remove('active');
+    state.activeTool = 'esignplace';
+    setToolHint('Klik di halaman untuk menempatkan tanda tangan.');
+  });
+
+  // ================== UPLOAD ==================
+  async function handleFile(file) {
+    if (!file) return;
+    if (!/\.(pdf|txt)$/i.test(file.name)) { showToast('Tipe file tidak didukung. Hanya PDF dan TXT.', 'error'); return; }
+
+    state.originalName = file.name; state.fileSize = file.size;
+    state.history = []; state.historyIndex = -1; state.annotations = [];
+    updateUndoRedoButtons(); setBackendEditControlsEnabled(false);
+
+    document.getElementById('status-filename').textContent = state.originalName;
+    document.getElementById('status-size').textContent = `${(state.fileSize / 1024).toFixed(1)} KB`;
+
+    if (/\.pdf$/i.test(file.name)) {
+      const arrayBuffer = await file.arrayBuffer();
+      await renderLocalPdf(arrayBuffer);
+      showToast('PDF dirender. Scroll ke bawah utk lihat semua halaman.', 'success');
+    } else {
+      showToast('File TXT dipilih. Preview visual hanya untuk PDF.', 'info');
+    }
+
+    try {
+      const formData = new FormData(); formData.append('file', file);
+      const uploadData = await apiFetch('/upload', { method: 'POST', body: formData });
+      state.history = [uploadData.filename]; state.historyIndex = 0;
+      updateUndoRedoButtons(); setBackendEditControlsEnabled(true);
+      showToast('Backend terhubung — mode edit aktif.', 'success');
+    } catch (err) { console.warn('Upload ke backend gagal, mode preview-only:', err.message); }
+  }
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+  ['dragover', 'dragleave', 'drop'].forEach((evt) => dropzone.addEventListener(evt, (e) => e.preventDefault()));
+  dropzone.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+
+  // ================== EXPORT PDF: minta lokasi simpan DULU, baru bakar annotation ke server ==================
+  document.getElementById('btn-export-pdf').addEventListener('click', async () => {
+    if (!requireBackendFile()) return;
+
+    if (state.annotations.length === 0) {
+      await downloadFile(currentFilename(), 'hasil-export.pdf');
+      return;
+    }
+
+    let fileHandle = null;
+    if (window.showSaveFilePicker) {
+      try {
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: 'hasil-export.pdf',
+          types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+        });
+      } catch (pickErr) {
+        if (pickErr.name === 'AbortError') {
+          showToast('Export dibatalkan. Teks & tanda tangan masih berupa draft, belum permanen.', 'info');
+          return;
+        }
+        console.warn('showSaveFilePicker gagal, lanjut dgn fallback unduhan biasa:', pickErr.message);
+      }
+    }
+
+    setLoading(true);
+    try {
+      let workingFilename = currentFilename();
+      const textAnns = state.annotations.filter((a) => a.type === 'text' && a.text.trim());
+      const sigAnns = state.annotations.filter((a) => a.type === 'signature');
+
+      for (const ann of textAnns) {
+        const finalText = composeListText(ann.text, ann.listType);
+        const data = await apiFetch('/add-text', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: workingFilename, page: ann.page, x: ann.xPt, y: ann.yPt, text: finalText,
+            fontSize: ann.fontSize, fontFamily: ann.fontFamily, bold: ann.bold, italic: ann.italic,
+            underline: ann.underline, color: ann.color,
+          }),
+        });
+        workingFilename = data.filename;
+      }
+
+      if (sigAnns.length) {
+        const patches = sigAnns.map((ann) => ({ page: ann.page, x: ann.xPt, y: ann.yPt, width: ann.widthPt, height: ann.heightPt, imageBase64: ann.imageBase64 }));
+        const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: workingFilename, patches }) });
+        workingFilename = data.filename;
+      }
+
+      pushHistory(workingFilename);
+      state.annotations = [];
+      await loadPdfFromServer(workingFilename);
+
+      const res = await fetch(`${API_BASE}/download/${encodeURIComponent(workingFilename)}`);
+      if (!res.ok) throw new Error('Gagal mengambil hasil akhir dari server');
+      const blob = await res.blob();
+
+      if (fileHandle) {
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        showToast('Semua teks & tanda tangan berhasil disimpan permanen ke file pilihan Anda.', 'success');
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'hasil-export.pdf';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        showToast('Semua teks & tanda tangan berhasil disimpan permanen & diunduh.', 'success');
+      }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  // ================== CONVERT ==================
+  document.getElementById('btn-convert').addEventListener('click', async () => {
+    if (!requireBackendFile()) return;
+    const format = document.getElementById('convert-format').value;
+    const endpointMap = { word: '/convert-to-word', excel: '/convert-to-excel', txt: '/convert-to-txt' };
+    const extMap = { word: 'docx', excel: 'xlsx', txt: 'txt' };
+    setLoading(true);
+    try {
+      const data = await apiFetch(endpointMap[format], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename() }) });
+      showToast('Konversi berhasil.', 'success');
+      await downloadFile(data.filename, `hasil-convert.${extMap[format]}`);
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  // ================== MERGE ==================
+  document.getElementById('btn-merge').addEventListener('click', () => document.getElementById('merge-input').click());
+  document.getElementById('merge-input').addEventListener('change', async (e) => {
+    const files = [...e.target.files];
+    if (files.length < 2) return showToast('Pilih minimal 2 file PDF untuk digabungkan.', 'info');
+    setLoading(true);
+    try {
+      const uploadedNames = []; const originalNames = [];
+      for (const file of files) {
+        const formData = new FormData(); formData.append('file', file);
+        const uploadData = await apiFetch('/upload', { method: 'POST', body: formData });
+        uploadedNames.push(uploadData.filename); originalNames.push(file.name);
+      }
+      const mergeData = await apiFetch('/merge-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: uploadedNames, originalNames }) });
+      showToast('PDF berhasil digabungkan.', 'success');
+      await downloadFile(mergeData.filename, 'hasil-merge.pdf');
+    } catch (err) { console.error(err); } finally { setLoading(false); e.target.value = ''; }
+  });
+
+  // ================== SPLIT (modal preview thumbnail interaktif) ==================
+  let splitSelectedPages = new Set();
+
+  document.getElementById('btn-split').addEventListener('click', async () => {
+    if (!requireBackendFile()) return;
+    splitSelectedPages = new Set();
+    const grid = document.getElementById('split-thumbnails');
+    grid.innerHTML = '';
+    document.getElementById('split-modal').classList.add('active');
+    updateSplitSummary();
+    setLoading(true);
+    try {
+      for (const pageInfo of state.pages) {
+        const smallViewport = pageInfo.pdfPage.getViewport({ scale: 0.35 });
+        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas.width = smallViewport.width; thumbCanvas.height = smallViewport.height;
+        await pageInfo.pdfPage.render({ canvasContext: thumbCanvas.getContext('2d'), viewport: smallViewport }).promise;
+
+        const item = document.createElement('div');
+        item.className = 'thumb-item';
+        item.dataset.pageNum = String(pageInfo.pageNum);
+        item.appendChild(thumbCanvas);
+        const label = document.createElement('div');
+        label.className = 'thumb-label'; label.textContent = `Hal. ${pageInfo.pageNum}`;
+        item.appendChild(label);
+        const check = document.createElement('div');
+        check.className = 'thumb-check';
+        check.innerHTML = '<span class="material-symbols-outlined">check</span>';
+        item.appendChild(check);
+        item.addEventListener('click', () => toggleSplitPage(pageInfo.pageNum, item));
+        grid.appendChild(item);
+      }
+    } finally { setLoading(false); }
+  });
+
+  function toggleSplitPage(pageNum, item) {
+    if (splitSelectedPages.has(pageNum)) { splitSelectedPages.delete(pageNum); item.classList.remove('selected'); }
+    else { splitSelectedPages.add(pageNum); item.classList.add('selected'); }
+    updateSplitSummary();
+  }
+  function updateSplitSummary() { document.getElementById('split-summary').textContent = `${splitSelectedPages.size} halaman dipilih dari ${state.numPages} total`; }
+
+  document.getElementById('split-select-all').addEventListener('click', () => {
+    const allSelected = splitSelectedPages.size === state.numPages;
+    document.querySelectorAll('#split-thumbnails .thumb-item').forEach((item) => {
+      const pageNum = parseInt(item.dataset.pageNum, 10);
+      if (allSelected) { splitSelectedPages.delete(pageNum); item.classList.remove('selected'); }
+      else { splitSelectedPages.add(pageNum); item.classList.add('selected'); }
+    });
+    updateSplitSummary();
+  });
+  document.getElementById('split-cancel').addEventListener('click', () => document.getElementById('split-modal').classList.remove('active'));
+
+  document.getElementById('split-confirm').addEventListener('click', async () => {
+    if (!splitSelectedPages.size) return showToast('Pilih minimal 1 halaman.', 'info');
+    const sorted = [...splitSelectedPages].sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0]; let prev = sorted[0];
+    for (let i = 1; i <= sorted.length; i += 1) {
+      if (i < sorted.length && sorted[i] === prev + 1) { prev = sorted[i]; continue; }
+      ranges.push({ start, end: prev });
+      if (i < sorted.length) { start = sorted[i]; prev = sorted[i]; }
+    }
+
+    document.getElementById('split-modal').classList.remove('active');
+    setLoading(true);
+    try {
+      const data = await apiFetch('/split-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), ranges }) });
+      showToast(`${data.files.length} file hasil split siap diunduh.`, 'success');
+      for (const f of data.files) await downloadFile(f.filename, `hasil-split-${f.range}.pdf`);
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  // ================== COMPRESS ==================
+  document.getElementById('btn-compress').addEventListener('click', async () => {
+    if (!requireBackendFile()) return;
+    setLoading(true);
+    try {
+      const data = await apiFetch('/compress-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename() }) });
+      const info = data.imagesProcessed > 0 ? ` (${data.imagesProcessed} gambar dikompres ulang)` : ' (PDF ini tampaknya berbasis teks, kompresi gambar tidak berlaku)';
+      showToast(`Ukuran berkurang ${data.reductionPercent}%${info}.`, 'success');
+      await downloadFile(data.filename, 'hasil-compress.pdf');
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  });
+
+  // ================== INIT ==================
+  checkBackendHealth();
+})();
+</script>
+</body></html>

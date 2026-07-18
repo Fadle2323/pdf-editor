@@ -1,0 +1,153 @@
+{
+  "info": {
+    "name": "PDF Editor Backend API",
+    "description": "Koleksi endpoint REST API untuk backend PDF Editor (lokal, tanpa auth).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api" },
+    { "key": "filename", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "Upload File",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/upload",
+        "body": {
+          "mode": "formdata",
+          "formdata": [{ "key": "file", "type": "file", "src": "" }]
+        }
+      }
+    },
+    {
+      "name": "Extract Text",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/extract-text",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\"\n}" }
+      }
+    },
+    {
+      "name": "Detect Words",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/detect-words",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"text\": \"Contoh isi dokumen PDF\"\n}" }
+      }
+    },
+    {
+      "name": "Delete Text",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/delete-text",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"text\": \"Contoh isi dokumen PDF\",\n  \"indexes\": [0, 2]\n}" }
+      }
+    },
+    {
+      "name": "Blur Text",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/blur-text",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"text\": \"Contoh isi dokumen PDF\",\n  \"indexes\": [1]\n}" }
+      }
+    },
+    {
+      "name": "Replace Text",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/replace-text",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"text\": \"Contoh isi dokumen PDF\",\n  \"search\": \"dokumen\",\n  \"replace\": \"berkas\",\n  \"caseSensitive\": false\n}" }
+      }
+    },
+    {
+      "name": "Add Text to PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/add-text",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\",\n  \"page\": 0,\n  \"x\": 50,\n  \"y\": 700,\n  \"text\": \"Teks tambahan\",\n  \"fontSize\": 14,\n  \"fontName\": \"Helvetica\",\n  \"color\": \"#7d562d\"\n}" }
+      }
+    },
+    {
+      "name": "Blur Area on PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/blur-area",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\",\n  \"areas\": [{ \"page\": 0, \"x\": 50, \"y\": 600, \"width\": 200, \"height\": 30 }]\n}" }
+      }
+    },
+    {
+      "name": "Convert to TXT",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/convert-to-txt",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\"\n}" }
+      }
+    },
+    {
+      "name": "Convert to Word",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/convert-to-word",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\"\n}" }
+      }
+    },
+    {
+      "name": "Convert to Excel",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/convert-to-excel",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\"\n}" }
+      }
+    },
+    {
+      "name": "Merge PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/merge-pdf",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filenames\": [\"file1.pdf\", \"file2.pdf\"]\n}" }
+      }
+    },
+    {
+      "name": "Split PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/split-pdf",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\",\n  \"ranges\": [{ \"start\": 1, \"end\": 3 }, { \"start\": 4, \"end\": 5 }]\n}" }
+      }
+    },
+    {
+      "name": "Compress PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/compress-pdf",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"filename\": \"{{filename}}\"\n}" }
+      }
+    },
+    {
+      "name": "Download File",
+      "request": { "method": "GET", "url": "{{baseUrl}}/download/{{filename}}" }
+    },
+    {
+      "name": "Cleanup File",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/cleanup/{{filename}}" }
+    }
+  ]
+}
