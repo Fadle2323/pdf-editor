@@ -43,13 +43,10 @@ app.use('/api', apiRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// --- Jalankan server dengan binding ke 0.0.0.0 untuk production (Render) ---
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`\n🚀 PDF Editor berjalan di port ${config.port}`);
   console.log(`   Buka aplikasi di browser`);
   console.log(`   API base URL: /api\n`);
-
-  // Jalankan auto-cleanup langsung sekali saat start, lalu jadwalkan berkala
   scheduleAutoCleanup();
 });
 

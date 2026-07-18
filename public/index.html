@@ -2,9 +2,9 @@
 <html class="light" lang="en"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>PDF Editor | Workspace</title>
+<title>Scripta | Workspace</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,600&family=Great+Vibes&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script id="tailwind-config">
       tailwind.config = {
@@ -86,6 +86,24 @@
         .thumb-item canvas { display: block; width: 100%; }
         .thumb-item .thumb-label { text-align: center; font-size: 11px; padding: 2px 0; color: #50453b; }
 
+        /* ================== LOGO "scripta" ================== */
+        .logo-container { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; text-decoration: none; }
+        .paper-icon-wrapper { position: relative; width: 28px; height: 28px; }
+        .paper-sheet-back, .paper-sheet-front { transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1); transform-origin: center; }
+        .logo-container:hover .paper-sheet-front { transform: translateY(-2px) scale(1.05); }
+        .logo-container:hover .paper-sheet-back { transform: rotate(-8deg) translate(-1px, -1px); }
+        .name-sig-wrapper { position: relative; display: flex; align-items: center; }
+        .font-brand { font-family: 'Great Vibes', cursive; font-size: 24px; color: #1F2937; text-transform: lowercase; line-height: 1; font-style: italic; padding-top: 4px; opacity: 0; animation: scriptaIntro 1.2s forwards cubic-bezier(0.25, 1, 0.5, 1); }
+        .signature-wrapper { position: absolute; bottom: -8px; left: 0; width: 100%; height: 16px; display: flex; align-items: flex-end; }
+        .underline-path-svg { width: 100%; height: 100%; stroke: #D4A373; stroke-width: 1.5; fill: none; stroke-linecap: round; }
+        .underline-path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: underlineDraw 1s forwards cubic-bezier(0.25, 1, 0.5, 1); animation-delay: 0.6s; }
+        .quill-tip { position: absolute; right: -12px; top: 0; width: 16px; height: 16px; fill: #D4A373; opacity: 0; transform: rotate(20deg) scale(0); animation: quillFadeIn 0.8s forwards cubic-bezier(0.25, 1, 0.5, 1); animation-delay: 1.2s; transform-origin: bottom left; }
+        @keyframes scriptaIntro { 0% { opacity: 0; transform: translateX(-10px); } 100% { opacity: 1; transform: translateX(0); } }
+        @keyframes underlineDraw { to { stroke-dashoffset: 0; } }
+        @keyframes quillFadeIn { 0% { opacity: 0; transform: rotate(20deg) scale(0); } 100% { opacity: 1; transform: rotate(0deg) scale(1); } }
+        .logo-container:hover .quill-tip { animation: quillTilt 0.4s forwards cubic-bezier(0.25, 1, 0.5, 1); }
+        @keyframes quillTilt { 0% { transform: rotate(0deg); } 100% { transform: rotate(-15deg) translate(-1px, -1px); } }
+
         @media (max-width: 767px) {
           #app-aside { display: none !important; }
           #app-main { padding-left: 0 !important; flex-direction: column; }
@@ -97,7 +115,27 @@
 <body class="grain-bg text-on-surface font-body-md h-screen flex flex-col overflow-hidden">
 
 <header class="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-margin-desktop h-16 bg-surface border-b border-outline-variant">
-<span class="font-display-doc text-display-doc text-primary leading-none">PDF Editor</span>
+<div class="logo-container">
+  <div class="paper-icon-wrapper">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+        <path class="paper-sheet-back" d="M19 3H9C7.89543 3 7 3.89543 7 5V15H17C18.1046 15 19 14.1046 19 13V3Z" fill="#D4A373" fill-opacity="0.4"></path>
+        <path class="paper-sheet-front" d="M16 7H6C4.89543 7 4 7.89543 4 9V19C4 20.1046 4.89543 21 6 21H16C17.1046 21 18 20.1046 18 19V9C18 7.89543 17.1046 7 16 7Z" fill="#D4A373"></path>
+    </svg>
+  </div>
+  <div class="name-sig-wrapper">
+      <span class="font-brand">scripta</span>
+      <div class="signature-wrapper">
+          <svg class="underline-path-svg" viewBox="0 0 100 16" preserveAspectRatio="none">
+              <path class="underline-path" d="M2 4 C 15 10, 45 12, 85 6"></path>
+          </svg>
+          <div class="quill-tip">
+              <svg viewBox="0 0 24 24">
+                  <path d="M21.5,2.5 C21.5,2.5 16,3 12,7 C8,11 7,16 7,16 L4,20 L4,21 L5,21 L9,17 C9,17 14,16 18,12 C22,8 21.5,2.5 21.5,2.5 Z M9.5,15.5 C8.5,16.5 7.5,17 7.5,17 C7.5,17 8,16 9,15 C9,15 9.5,15.5 9.5,15.5 Z"></path>
+              </svg>
+          </div>
+      </div>
+  </div>
+</div>
 <span id="connection-status" class="font-label-sm text-on-surface-variant hidden sm:inline-block">Backend: checking...</span>
 </header>
 
