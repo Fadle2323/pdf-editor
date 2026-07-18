@@ -121,7 +121,7 @@
         #preloader .preloader-inner { display: flex; flex-direction: column; align-items: center; opacity: 0; transform: scale(0.92); animation: preloaderIn 0.7s forwards cubic-bezier(0.25, 1, 0.5, 1); }
         @keyframes preloaderIn { to { opacity: 1; transform: scale(1); } }
         #preloader .logo-container { transform: scale(1.9); cursor: default; }
-        #preloader .loading-bar-wrapper { width: 140px; height: 3px; background: rgba(212, 163, 115, 0.2); border-radius: 999px; overflow: hidden; margin-top: 40px; }
+        #preloader .loading-bar-wrapper { width: 140px; height: 3px; background: rgba(212, 163, 115, 0.2); border-radius: 999px; overflow: hidden; margin-top: 40px; transform: translateX(12px); }
         #preloader .loading-bar-fill { height: 100%; width: 0%; background: #D4A373; border-radius: 999px; animation: loadingBarFill 2.1s cubic-bezier(0.65, 0, 0.35, 1) forwards; animation-delay: 0.3s; }
         @keyframes loadingBarFill { to { width: 100%; } }
 
