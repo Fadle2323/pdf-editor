@@ -62,6 +62,19 @@
         .spinner { width: 36px; height: 36px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* FIX BUG ZOOM/SCROLL: align-items:center pada flex container yg overflow-auto
+           punya bug klasik CSS -- konten yg lebih lebar dari container jadi terpotong
+           di sisi kiri & tidak bisa di-scroll ke sana (browser tidak expose overflow
+           negatif dari centering). Solusinya: JANGAN pakai align-items/justify-content
+           center pada elemen yg overflow-auto; pakai margin:auto + width:fit-content
+           pada kontennya sendiri -- ini otomatis full-scroll kalau lebih besar dari
+           viewport (nempel kiri, overflow penuh ke kanan, seluruhnya bisa di-scroll),
+           dan tetap center kalau lebih kecil (margin:auto punya slack utk itu). */
+        #left-section { display: block; }
+        #left-section > .sticky,
+        #text-format-bar,
+        #pages-container { margin-left: auto; margin-right: auto; width: fit-content; }
+
         #pages-container { display: flex; flex-direction: column; align-items: center; gap: 32px; padding-bottom: 80px; }
         .page-wrapper { position: relative; background: #fff; }
         .page-wrapper canvas { display: block; max-width: none; }
@@ -134,67 +147,68 @@
     </style>
 </head>
 <body class="grain-bg text-on-surface font-body-md h-screen flex flex-col overflow-hidden">
-  <!-- ================== PRELOADER ================== -->
-  <div id="preloader">
-    <div class="preloader-inner">
-      <div class="logo-container">
-        <div class="paper-icon-wrapper">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
-              <g class="paper-sheet-back">
-                  <path d="M7 5C7 3.89543 7.89543 3 9 3H15L19 7V13C19 14.1046 18.1046 15 17 15H7V5Z" fill="#D4A373" fill-opacity="0.4"></path>
-                  <path d="M15 3V7H19L15 3Z" fill="#B38659" fill-opacity="0.4"></path>
-              </g>
-              <g class="paper-sheet-front">
-                  <path d="M4 9C4 7.89543 4.89543 7 6 7H12L16 11V19C16 20.1046 15.1046 21 14 21H6C4.89543 21 4 20.1046 4 19V9Z" fill="#D4A373"></path>
-                  <path d="M12 7V11H16L12 7Z" fill="#B38659"></path>
-                  <line x1="7" y1="12" x2="11" y2="12" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
-                  <line x1="7" y1="15" x2="13" y2="15" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
-                  <line x1="7" y1="18" x2="11" y2="18" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
-              </g>
-          </svg>
-        </div>
-        <div class="name-sig-wrapper">
-            <span class="font-brand">scripta</span>
-            <div class="signature-wrapper">
-                <svg class="underline-path-svg" viewBox="0 0 100 16" preserveAspectRatio="none">
-                    <path class="underline-path" d="M2 4 C 15 10, 45 12, 85 6"></path>
-                </svg>
-                <div class="quill-tip">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M21.5,2.5 C21.5,2.5 16,3 12,7 C8,11 7,16 7,16 L4,20 L4,21 L5,21 L9,17 C9,17 14,16 18,12 C22,8 21.5,2.5 21.5,2.5 Z M9.5,15.5 C8.5,16.5 7.5,17 7.5,17 C7.5,17 8,16 9,15 C9,15 9.5,15.5 9.5,15.5 Z"></path>
-                    </svg>
-                </div>
-            </div>
-        </div>
+
+<!-- ================== PRELOADER ================== -->
+<div id="preloader">
+  <div class="preloader-inner">
+    <div class="logo-container">
+      <div class="paper-icon-wrapper">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+            <g class="paper-sheet-back">
+                <path d="M7 5C7 3.89543 7.89543 3 9 3H15L19 7V13C19 14.1046 18.1046 15 17 15H7V5Z" fill="#D4A373" fill-opacity="0.4"></path>
+                <path d="M15 3V7H19L15 3Z" fill="#B38659" fill-opacity="0.4"></path>
+            </g>
+            <g class="paper-sheet-front">
+                <path d="M4 9C4 7.89543 4.89543 7 6 7H12L16 11V19C16 20.1046 15.1046 21 14 21H6C4.89543 21 4 20.1046 4 19V9Z" fill="#D4A373"></path>
+                <path d="M12 7V11H16L12 7Z" fill="#B38659"></path>
+                <line x1="7" y1="12" x2="11" y2="12" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+                <line x1="7" y1="15" x2="13" y2="15" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+                <line x1="7" y1="18" x2="11" y2="18" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
+            </g>
+        </svg>
       </div>
-      <div class="loading-bar-wrapper">
-        <div class="loading-bar-fill"></div>
+      <div class="name-sig-wrapper">
+          <span class="font-brand">scripta</span>
+          <div class="signature-wrapper">
+              <svg class="underline-path-svg" viewBox="0 0 100 16" preserveAspectRatio="none">
+                  <path class="underline-path" d="M2 4 C 15 10, 45 12, 85 6"></path>
+              </svg>
+              <div class="quill-tip">
+                  <svg viewBox="0 0 24 24">
+                      <path d="M21.5,2.5 C21.5,2.5 16,3 12,7 C8,11 7,16 7,16 L4,20 L4,21 L5,21 L9,17 C9,17 14,16 18,12 C22,8 21.5,2.5 21.5,2.5 Z M9.5,15.5 C8.5,16.5 7.5,17 7.5,17 C7.5,17 8,16 9,15 C9,15 9.5,15.5 9.5,15.5 Z"></path>
+                  </svg>
+              </div>
+          </div>
       </div>
     </div>
+    <div class="loading-bar-wrapper">
+      <div class="loading-bar-fill"></div>
+    </div>
   </div>
-  <script>
-  (function () {
-    var pageStart = Date.now();
-    var MIN_DURATION = 2500; // ms
+</div>
+<script>
+(function () {
+  var pageStart = Date.now();
+  var MIN_DURATION = 2500; // ms
 
-    function hidePreloader() {
-      var preloader = document.getElementById('preloader');
-      if (!preloader) return;
-      var elapsed = Date.now() - pageStart;
-      var remaining = Math.max(0, MIN_DURATION - elapsed);
-      setTimeout(function () {
-        preloader.classList.add('fade-out');
-        preloader.addEventListener('transitionend', function onEnd() {
-          preloader.style.display = 'none';
-          preloader.removeEventListener('transitionend', onEnd);
-        });
-      }, remaining);
-    }
+  function hidePreloader() {
+    var preloader = document.getElementById('preloader');
+    if (!preloader) return;
+    var elapsed = Date.now() - pageStart;
+    var remaining = Math.max(0, MIN_DURATION - elapsed);
+    setTimeout(function () {
+      preloader.classList.add('fade-out');
+      preloader.addEventListener('transitionend', function onEnd() {
+        preloader.style.display = 'none';
+        preloader.removeEventListener('transitionend', onEnd);
+      });
+    }, remaining);
+  }
 
-    if (document.readyState === 'complete') hidePreloader();
-    else window.addEventListener('load', hidePreloader);
-  })();
-  </script>
+  if (document.readyState === 'complete') hidePreloader();
+  else window.addEventListener('load', hidePreloader);
+})();
+</script>
 
 <header class="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-margin-desktop h-16 bg-surface border-b border-outline-variant">
 <div class="logo-container">
@@ -212,7 +226,7 @@
             <line x1="7" y1="18" x2="11" y2="18" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"></line>
         </g>
     </svg>
-</div>
+  </div>
   <div class="name-sig-wrapper">
       <span class="font-brand">scripta</span>
       <div class="signature-wrapper">
@@ -228,20 +242,33 @@
   </div>
 </div>
 <span id="connection-dot" class="status-dot status-dot-checking hidden sm:inline-block" title="Memeriksa backend..."></span>
-</span>
 </header>
 
-<aside id="app-aside" class="hidden md:flex flex-col h-screen pt-16 pb-4 px-4 fixed left-0 w-64 bg-surface-container-low border-r border-outline-variant z-40">
-<div class="flex flex-col gap-unit-2 mt-4">
-<div class="px-4 py-2 flex items-center gap-3 bg-primary-container text-on-primary-container rounded-lg font-medium">
-<span class="material-symbols-outlined">edit</span><span class="font-label-sm">Tools</span>
+<aside id="app-aside" class="hidden md:flex flex-col h-screen pt-16 pb-4 px-4 fixed left-0 w-80 bg-surface-container-low border-r border-outline-variant z-40" style="min-width: 240px; max-width: 480px;">
+<div class="flex flex-col gap-unit-2 mt-4 mb-4">
+<div class="px-4 py-2 flex items-center gap-3 bg-primary-container text-on-primary-container rounded-lg font-medium min-w-0">
+<span class="material-symbols-outlined flex-shrink-0">edit</span><span class="font-label-sm truncate">Tools</span>
 </div>
 </div>
+
+<hr class="border-outline-variant my-2"/>
+
+<div class="flex flex-col flex-1 min-h-0 mt-2 min-w-0">
+<div class="flex items-center justify-between mb-3 gap-2 min-w-0">
+<h2 class="font-label-sm uppercase tracking-widest text-on-surface-variant truncate">Activity Log</h2>
+<span id="history-current-badge" class="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded font-mono truncate max-w-[45%] flex-shrink-0">Belum ada file</span>
+</div>
+<div id="history-list" class="flex flex-col gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar min-w-0">
+<p class="font-label-sm text-on-surface-variant opacity-60 text-center mt-4">Riwayat aktivitas akan muncul di sini setelah upload PDF.</p>
+</div>
+</div>
+
+<div id="sidebar-resizer" class="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/40 active:bg-primary transition-colors" title="Geser untuk mengubah lebar sidebar"></div>
 </aside>
 
-<main id="app-main" class="flex-1 flex md:pl-64 pt-16 pb-10 overflow-hidden">
+<main id="app-main" class="flex-1 flex md:pl-80 pt-16 pb-10 overflow-hidden">
 <!-- Left: PDF viewer (scroll vertikal, semua halaman) -->
-<section id="left-section" class="w-full md:w-3/5 relative bg-surface-container-lowest flex flex-col items-center p-unit-6 overflow-auto custom-scrollbar">
+<section id="left-section" class="w-full md:w-3/5 relative bg-surface-container-lowest p-unit-6 overflow-auto custom-scrollbar">
 
 <!-- Toolbar -->
 <div class="sticky top-0 z-30 mb-unit-6 flex items-center gap-unit-1 bg-white/90 backdrop-blur-md px-3 py-2 rounded-full border border-outline-variant pdf-page-shadow flex-wrap justify-center">
@@ -303,7 +330,7 @@
 </div>
 
 <div id="pages-container"></div>
-<p id="empty-state" class="opacity-50 mt-12 text-center max-w-xs">Upload file PDF di panel kanan untuk mulai mengedit langsung di atas halamannya. Seret (drag) di halaman untuk menyeleksi area secara manual — bisa lebih dari satu area sekaligus. Scroll ke bawah untuk pindah halaman.</p>
+<p id="empty-state" class="opacity-50 mt-12 text-center max-w-xs mx-auto">Upload file PDF di panel kanan untuk mulai mengedit langsung di atas halamannya. Seret (drag) di halaman untuk menyeleksi area secara manual — bisa lebih dari satu area sekaligus. Scroll ke bawah untuk pindah halaman.</p>
 </section>
 
 <!-- Right: Control Panel -->
@@ -340,6 +367,7 @@
 <option value="mosaic">Mosaik (Kotak Besar)</option>
 <option value="black">Blok Hitam Solid</option>
 <option value="noise">Acak (Noise)</option>
+<option value="handwriter">Coretan Tangan (Handwriter)</option>
 </select>
 <button id="btn-blur-selection" class="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-sm hover:opacity-90">Blur</button>
 </div>
@@ -387,7 +415,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally - no database.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -495,7 +523,10 @@
     showToast('Fitur ini butuh koneksi ke backend & file sudah ter-upload ke server.', 'error');
     return false;
   }
-  function currentFilename() { return state.history[state.historyIndex]; }
+  function currentFilename() {
+    const entry = state.history[state.historyIndex];
+    return entry ? entry.filename : undefined;
+  }
   function setToolHint(text) {
     const el = document.getElementById('tool-hint');
     if (text) { el.textContent = text; el.classList.remove('hidden'); } else { el.classList.add('hidden'); }
@@ -581,12 +612,42 @@
     }
   }
 
-  // ================== HISTORY (UNDO/REDO) ==================
-  function pushHistory(filename) {
+  // ================== HISTORY / ACTIVITY LOG (UNDO/REDO + RESTORE POINT) ==================
+  // state.history sekarang array objek {id, filename, actionName, timestamp},
+  // bukan cuma nama file -- supaya bisa ditampilkan sbg log yg bisa diklik.
+  // Restore-nya tetap lewat mekanisme yg sama (loadPdfFromServer per index),
+  // krn arsitektur kita menyimpan tiap state sbg file PDF utuh di server
+  // (bukan snapshot innerHTML/DOM spt pola generik "canvas editor").
+
+  const ICON_MAP = [
+    ['upload', 'cloud_upload'], ['original', 'description'],
+    ['hapus', 'delete'], ['delete', 'delete'],
+    ['blur', 'blur_on'],
+    ['tanda tangan', 'draw'], ['signature', 'draw'], ['e-sign', 'draw'],
+    ['teks', 'title'], ['text', 'title'],
+    ['export', 'save'], ['simpan', 'save'],
+    ['convert', 'sync_alt'], ['konversi', 'sync_alt'],
+    ['kompres', 'compress'], ['compress', 'compress'],
+    ['gabung', 'call_merge'], ['merge', 'call_merge'],
+    ['split', 'call_split'], ['pisah', 'call_split'],
+  ];
+  function getActionIcon(actionName) {
+    const lower = actionName.toLowerCase();
+    const found = ICON_MAP.find(([keyword]) => lower.includes(keyword));
+    return found ? found[1] : 'gesture';
+  }
+
+  function pushHistory(filename, actionName = 'Perubahan diterapkan') {
     state.history = state.history.slice(0, state.historyIndex + 1);
-    state.history.push(filename);
+    state.history.push({
+      id: (crypto.randomUUID ? crypto.randomUUID() : 'h' + Date.now() + Math.random().toString(36).slice(2)),
+      filename,
+      actionName,
+      timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    });
     state.historyIndex = state.history.length - 1;
     updateUndoRedoButtons();
+    renderHistoryLog();
   }
   function updateUndoRedoButtons() {
     setEnabled('btn-undo', state.historyIndex > 0);
@@ -596,7 +657,50 @@
     if (index < 0 || index >= state.history.length) return;
     state.historyIndex = index;
     updateUndoRedoButtons();
+    renderHistoryLog();
     await loadPdfFromServer(currentFilename());
+  }
+
+  function renderHistoryLog() {
+    const list = document.getElementById('history-list');
+    const badge = document.getElementById('history-current-badge');
+    if (!list || !badge) return;
+
+    if (!state.history.length) {
+      list.innerHTML = '<p class="font-label-sm text-on-surface-variant opacity-60 text-center mt-4">Riwayat aktivitas akan muncul di sini setelah upload PDF.</p>';
+      badge.textContent = 'Belum ada file';
+      return;
+    }
+
+    const activeEntry = state.history[state.historyIndex];
+    badge.textContent = activeEntry.actionName;
+
+    list.innerHTML = '';
+    // Urutan dibalik: aktivitas paling baru tampil paling atas.
+    for (let i = state.history.length - 1; i >= 0; i -= 1) {
+      const entry = state.history[i];
+      const isActive = i === state.historyIndex;
+      const item = document.createElement('div');
+      item.className = 'group cursor-pointer flex flex-col gap-1 p-3 rounded-lg border transition-all duration-200 '
+        + (isActive
+          ? 'bg-primary-container border-primary shadow-sm'
+          : 'bg-white border-outline-variant hover:border-primary hover:bg-surface-container-high');
+
+      const icon = getActionIcon(entry.actionName);
+      item.innerHTML = `
+        <div class="flex justify-between items-start gap-2">
+          <div class="flex items-start gap-3 min-w-0">
+            <span class="material-symbols-outlined text-[20px] mt-0.5 flex-shrink-0 ${isActive ? 'text-on-primary-container' : 'text-on-surface-variant'}">${icon}</span>
+            <div class="flex flex-col min-w-0">
+              <span class="font-body-md text-[13px] font-medium leading-tight truncate ${isActive ? 'text-on-primary-container' : 'text-on-surface'}">${entry.actionName}</span>
+              ${isActive ? '<span class="text-[9px] font-bold tracking-wider uppercase opacity-70 mt-1">Current State</span>' : ''}
+            </div>
+          </div>
+          <span class="text-[10px] font-mono opacity-60 flex-shrink-0 mt-0.5">${entry.timestamp}</span>
+        </div>`;
+      item.addEventListener('click', () => goToHistory(i));
+      list.appendChild(item);
+    }
   }
 
   // ================== LOAD PDF (lokal / server) & RENDER SEMUA HALAMAN ==================
@@ -695,6 +799,12 @@
     const textContent = await pageInfo.pdfPage.getTextContent();
     const boxes = [];
     let globalIndex = 0;
+    // FIX BUG DESCENDER: tx[5] adalah posisi BASELINE (bukan bawah huruf).
+    // itemHeight dari transform cuma mewakili tinggi em-square font, dan
+    // batas bawah default (baseline) memotong huruf berekor spt g/p/y/j/q
+    // yang menjorok DI BAWAH baseline. Tambahkan padding ~25% dari tinggi
+    // font ke bagian bawah kotak supaya descender ikut tercakup penuh.
+    const DESCENDER_RATIO = 0.25;
     textContent.items.forEach((item) => {
       if (!item.str || !item.str.trim()) return;
       const tx = pdfjsLib.Util.transform(pageInfo.viewport.transform, item.transform);
@@ -702,13 +812,14 @@
       const itemWidth = item.width * state.scale;
       const itemX = tx[4];
       const itemY = tx[5] - itemHeight;
+      const boxHeight = itemHeight * (1 + DESCENDER_RATIO);
       const words = item.str.split(/(\s+)/).filter((w) => w.length > 0);
       const totalChars = item.str.length || 1;
       let charOffset = 0;
       words.forEach((chunk) => {
         const chunkWidth = (chunk.length / totalChars) * itemWidth;
         if (chunk.trim().length > 0) {
-          boxes.push({ index: globalIndex++, text: chunk, x: itemX + (charOffset / totalChars) * itemWidth, y: itemY, width: chunkWidth, height: itemHeight });
+          boxes.push({ index: globalIndex++, text: chunk, x: itemX + (charOffset / totalChars) * itemWidth, y: itemY, width: chunkWidth, height: boxHeight });
         }
         charOffset += chunk.length;
       });
@@ -1134,8 +1245,7 @@
     const d = state.draftSnipRect;
     if (d && d.width >= 4 && d.height >= 4 && state.dragPageNum) {
       state.selectedAreas.push({ id: 's' + Date.now() + Math.random().toString(36).slice(2), page: state.dragPageNum - 1, ...d });
-
-} else {
+    } else {
       state.selectedAreas = [];
     }
     state.draftSnipRect = null;
@@ -1182,7 +1292,35 @@
     crop.getContext('2d').drawImage(pageInfo.canvas, rect.x, rect.y, rect.width, rect.height, 0, 0, crop.width, crop.height);
     return crop;
   }
-  function applyGaussianBlur(src, px) { const out = document.createElement('canvas'); out.width = src.width; out.height = src.height; const ctx = out.getContext('2d'); ctx.filter = `blur(${px}px)`; ctx.drawImage(src, 0, 0); return out; }
+  // FIX BUG "Blur Ringan terlalu kuat / Blur Kuat terlalu lemah":
+  // Akar masalahnya BUKAN radius blur-nya tertukar (14px > 4px sudah benar
+  // scr angka), tapi ctx.filter='blur()' pada crop yg KECIL & PAS-PASAN
+  // (tanpa padding) membuat sebagian hasil blur jadi TRANSPARAN krn area di
+  // luar tepi crop dianggap kosong oleh browser. Radius besar (Kuat) di
+  // gambar sekecil itu jadi mendifusikan tinta ke area transparan -> hasil
+  // akhirnya malah TIPIS/tembus pandang shg teks asli di baliknya masih
+  // kelihatan. Radius kecil (Ringan) tidak sempat berdifusi jauh -> jadi
+  // gumpalan padat gelap yg terlihat spt "hilang total". Solusinya: isi
+  // latar OPAQUE dulu (warna diambil dari pojok crop, mendekati warna latar
+  // halaman asli) SEBELUM di-blur, supaya hasil akhirnya selalu 100% menutup
+  // apa pun radiusnya -- yg berubah cuma tingkat kelembutan visualnya.
+  function sampleCornerColor(canvas) {
+    try {
+      const ctx = canvas.getContext('2d');
+      const d = ctx.getImageData(0, 0, 1, 1).data;
+      return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+    } catch (e) { return '#f5f3f0'; }
+  }
+  function applyGaussianBlur(src, px) {
+    const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = sampleCornerColor(src);
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.filter = `blur(${px}px)`;
+    ctx.drawImage(src, 0, 0);
+    ctx.filter = 'none';
+    return out;
+  }
   function applyPixelate(src, scaleDown) {
     const small = document.createElement('canvas');
     small.width = Math.max(1, Math.round(src.width * scaleDown)); small.height = Math.max(1, Math.round(src.height * scaleDown));
@@ -1198,6 +1336,26 @@
     for (let i = 0; i < imgData.data.length; i += 4) { const v = Math.floor(Math.random() * 255); imgData.data[i] = v; imgData.data[i + 1] = v; imgData.data[i + 2] = v; imgData.data[i + 3] = 255; }
     ctx.putImageData(imgData, 0, 0); return out;
   }
+  // FITUR BARU: gaya "Handwriter" -- coretan solid spt ditimpa spidol tangan,
+  // bukan blur. Beberapa goresan horizontal dgn sedikit gelombang & variasi
+  // ketebalan acak supaya terkesan alami/tidak kaku, full-opaque menutupi.
+  function applyHandwriter(src) {
+    const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#1b1c1a'; ctx.strokeStyle = '#1b1c1a';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const strokeCount = Math.max(1, Math.round(out.height / 6));
+    for (let i = 0; i < strokeCount; i += 1) {
+      const baseY = (i + 0.5) * (out.height / strokeCount);
+      const y = baseY + (Math.random() - 0.5) * 3;
+      ctx.lineWidth = out.height / strokeCount + 2 + Math.random() * 2;
+      ctx.beginPath();
+      ctx.moveTo(-3, y + (Math.random() - 0.5) * 2);
+      ctx.quadraticCurveTo(out.width / 2, y + (Math.random() - 0.5) * 4, out.width + 3, y + (Math.random() - 0.5) * 2);
+      ctx.stroke();
+    }
+    return out;
+  }
   function processBlurStyle(cropped, style) {
     switch (style) {
       case 'strong': return applyGaussianBlur(cropped, 14);
@@ -1205,8 +1363,52 @@
       case 'mosaic': return applyPixelate(cropped, 0.04);
       case 'black': return applySolidBlack(cropped);
       case 'noise': return applyNoise(cropped);
+      case 'handwriter': return applyHandwriter(cropped);
       default: return applyGaussianBlur(cropped, 4);
     }
+  }
+
+  // FIX BUG "Delete jadi bolong putih di background berwarna": sebelumnya
+  // warna redaksi delete di-hardcode putih (#ffffff), jadi di halaman
+  // berlatar warna (mis. lingkaran maroon) hasilnya jadi kotak putih
+  // mencolok. Fungsi ini mengambil sampel warna dari CINCIN TIPIS DI
+  // SEKELILING area (bukan dari dalamnya, krn di dalam ada teks yg mau
+  // dihapus), lalu dirata-ratakan sbg pendekatan warna latar di sekitar
+  // situ -- bukan inpainting AI penuh, tapi cukup akurat utk latar solid/
+  // nyaris-solid (kasus paling umum) tanpa perlu library image processing
+  // tambahan.
+  function sampleSurroundingColor(pageInfo, rect) {
+    const canvas = pageInfo.canvas;
+    const ctx = canvas.getContext('2d');
+    const margin = 4;
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    const steps = 8;
+    const points = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const dx = (w / steps) * i;
+      points.push([rect.x + dx, rect.y - margin]);
+      points.push([rect.x + dx, rect.y + h + margin]);
+    }
+    for (let i = 0; i <= steps; i += 1) {
+      const dy = (h / steps) * i;
+      points.push([rect.x - margin, rect.y + dy]);
+      points.push([rect.x + w + margin, rect.y + dy]);
+    }
+
+    let r = 0; let g = 0; let b = 0; let count = 0;
+    points.forEach(([px, py]) => {
+      const cx = Math.max(0, Math.min(canvas.width - 1, Math.round(px)));
+      const cy = Math.max(0, Math.min(canvas.height - 1, Math.round(py)));
+      try {
+        const d = ctx.getImageData(cx, cy, 1, 1).data;
+        r += d[0]; g += d[1]; b += d[2]; count += 1;
+      } catch (e) { /* abaikan titik yg gagal dibaca */ }
+    });
+    if (count === 0) return '#ffffff';
+    r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
+    const toHex = (v) => v.toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   }
 
   // ================== AKSI: DELETE (lintas halaman sekaligus) ==================
@@ -1217,12 +1419,13 @@
     try {
       const areas = state.selectedAreas.map((a) => {
         const pageInfo = getPageInfo(a.page + 1);
-        return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), color: '#ffffff' };
+        const bgColor = sampleSurroundingColor(pageInfo, a);
+        return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), color: bgColor };
       });
       const data = await apiFetch('/blur-area', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), areas }) });
-      pushHistory(data.filename);
+      pushHistory(data.filename, `Hapus ${areas.length} area terpilih`);
       await loadPdfFromServer(data.filename);
-      showToast(`${areas.length} area terpilih berhasil dihapus.`, 'success');
+      showToast(`${areas.length} area terpilih berhasil dihapus (warna latar menyesuaikan sekitarnya).`, 'success');
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
 
@@ -1240,7 +1443,7 @@
         return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), imageBase64: processed.toDataURL('image/png') };
       });
       const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), patches }) });
-      pushHistory(data.filename);
+      pushHistory(data.filename, `Blur diterapkan: ${document.getElementById('blur-style').selectedOptions[0].textContent} (${patches.length} area)`);
       await loadPdfFromServer(data.filename);
       showToast(`${patches.length} area terpilih berhasil di-blur.`, 'success');
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -1337,7 +1540,7 @@
 
     state.originalName = file.name; state.fileSize = file.size;
     state.history = []; state.historyIndex = -1; state.annotations = [];
-    updateUndoRedoButtons(); setBackendEditControlsEnabled(false);
+    updateUndoRedoButtons(); setBackendEditControlsEnabled(false); renderHistoryLog();
 
     document.getElementById('status-filename').textContent = state.originalName;
     document.getElementById('status-size').textContent = `${(state.fileSize / 1024).toFixed(1)} KB`;
@@ -1353,8 +1556,9 @@
     try {
       const formData = new FormData(); formData.append('file', file);
       const uploadData = await apiFetch('/upload', { method: 'POST', body: formData });
-      state.history = [uploadData.filename]; state.historyIndex = 0;
-      updateUndoRedoButtons(); setBackendEditControlsEnabled(true);
+      state.history = []; state.historyIndex = -1;
+      pushHistory(uploadData.filename, `Dokumen diupload: ${file.name}`);
+      setBackendEditControlsEnabled(true);
       showToast('Backend terhubung — mode edit aktif.', 'success');
     } catch (err) { console.warn('Upload ke backend gagal, mode preview-only:', err.message); }
   }
@@ -1367,6 +1571,12 @@
   dropzone.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
 
   // ================== EXPORT PDF: minta lokasi simpan DULU, baru bakar annotation ke server ==================
+  // PENTING: urutan ini disengaja. Kalau proses "bakar" (add-text/apply-patches)
+  // dijalankan SEBELUM dialog pilih lokasi file, maka membatalkan dialog tidak
+  // akan membatalkan perubahan yang sudah kadung tersimpan di server -- teks/
+  // tanda tangan jadi permanen padahal Export-nya sendiri batal. Makanya di sini
+  // dialog pilih lokasi (kalau didukung browser) diminta PALING AWAL; kalau user
+  // batal di situ, tidak ada satu pun request ke server yang dikirim.
   document.getElementById('btn-export-pdf').addEventListener('click', async () => {
     if (!requireBackendFile()) return;
 
@@ -1399,7 +1609,7 @@
 
       for (const ann of textAnns) {
         const finalText = composeListText(ann.text, ann.listType);
-        const data = await apiFetch('/add-text', {
+        const data = await apiFetch('/add-text', { // eslint-disable-line no-await-in-loop
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename: workingFilename, page: ann.page, x: ann.xPt, y: ann.yPt, text: finalText,
@@ -1416,10 +1626,15 @@
         workingFilename = data.filename;
       }
 
-      pushHistory(workingFilename);
+      const parts = [];
+      if (textAnns.length) parts.push(`${textAnns.length} teks`);
+      if (sigAnns.length) parts.push(`${sigAnns.length} tanda tangan`);
+      pushHistory(workingFilename, `Export: ${parts.join(' & ')} disimpan permanen`);
       state.annotations = [];
       await loadPdfFromServer(workingFilename);
 
+      // Baru sekarang benar-benar menulis filenya -- pakai handle yg sudah
+      // dipilih di awal (kalau ada), atau fallback unduhan biasa.
       const res = await fetch(`${API_BASE}/download/${encodeURIComponent(workingFilename)}`);
       if (!res.ok) throw new Error('Gagal mengambil hasil akhir dari server');
       const blob = await res.blob();
@@ -1464,7 +1679,7 @@
       const uploadedNames = []; const originalNames = [];
       for (const file of files) {
         const formData = new FormData(); formData.append('file', file);
-        const uploadData = await apiFetch('/upload', { method: 'POST', body: formData });
+        const uploadData = await apiFetch('/upload', { method: 'POST', body: formData }); // eslint-disable-line no-await-in-loop
         uploadedNames.push(uploadData.filename); originalNames.push(file.name);
       }
       const mergeData = await apiFetch('/merge-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: uploadedNames, originalNames }) });
@@ -1486,10 +1701,10 @@
     setLoading(true);
     try {
       for (const pageInfo of state.pages) {
-        const smallViewport = pageInfo.pdfPage.getViewport({ scale: 0.35 });
+        const smallViewport = pageInfo.pdfPage.getViewport({ scale: 0.35 }); // eslint-disable-line no-await-in-loop
         const thumbCanvas = document.createElement('canvas');
         thumbCanvas.width = smallViewport.width; thumbCanvas.height = smallViewport.height;
-        await pageInfo.pdfPage.render({ canvasContext: thumbCanvas.getContext('2d'), viewport: smallViewport }).promise;
+        await pageInfo.pdfPage.render({ canvasContext: thumbCanvas.getContext('2d'), viewport: smallViewport }).promise; // eslint-disable-line no-await-in-loop
 
         const item = document.createElement('div');
         item.className = 'thumb-item';
@@ -1542,7 +1757,7 @@
     try {
       const data = await apiFetch('/split-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), ranges }) });
       showToast(`${data.files.length} file hasil split siap diunduh.`, 'success');
-      for (const f of data.files) await downloadFile(f.filename, `hasil-split-${f.range}.pdf`);
+      for (const f of data.files) await downloadFile(f.filename, `hasil-split-${f.range}.pdf`); // eslint-disable-line no-await-in-loop
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
 
@@ -1557,6 +1772,57 @@
       await downloadFile(data.filename, 'hasil-compress.pdf');
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
+
+  // ================== RESIZABLE SIDEBAR ==================
+  // Sidebar kita position:fixed (bukan flex sibling biasa), jadi lebar
+  // sidebar & padding-left area utama (#app-main) harus disinkronkan
+  // manual saat digeser -- kalau tidak, sidebar akan menimpa/menabrak
+  // kanvas atau menyisakan celah kosong. Lebar tersimpan cuma di memori
+  // (variabel JS), bukan localStorage/database -- reset tiap refresh,
+  // konsisten dengan filosofi aplikasi ini.
+  (function setupSidebarResize() {
+    const sidebar = document.getElementById('app-aside');
+    const main = document.getElementById('app-main');
+    const resizer = document.getElementById('sidebar-resizer');
+    if (!sidebar || !main || !resizer) return;
+
+    const MIN_WIDTH = 240;
+    const MAX_WIDTH = 480;
+    const isDesktop = () => window.matchMedia('(min-width: 768px)').matches;
+    let isResizing = false;
+
+    function applyWidth(px) {
+      sidebar.style.width = px + 'px';
+      if (isDesktop()) main.style.paddingLeft = px + 'px';
+    }
+
+    resizer.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      document.body.classList.add('select-none');
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, e.clientX));
+      applyWidth(clamped);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('select-none');
+      document.body.style.cursor = '';
+    });
+
+    // Kalau window di-resize lintas breakpoint mobile<->desktop, sinkronkan
+    // ulang padding #app-main (di mobile sidebar disembunyikan, padding hrs 0).
+    window.addEventListener('resize', () => {
+      const currentWidth = parseInt(sidebar.style.width, 10) || 320;
+      main.style.paddingLeft = isDesktop() ? currentWidth + 'px' : '';
+    });
+  })();
 
   // ================== INIT ==================
   checkBackendHealth();

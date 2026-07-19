@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "PDF Editor Backend API",
-    "description": "Koleksi endpoint REST API untuk backend PDF Editor (lokal, tanpa auth).",
+    "name": "Scripta Backend API",
+    "description": "Koleksi endpoint REST API untuk backend Scripta (lokal, tanpa auth).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
