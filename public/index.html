@@ -271,12 +271,15 @@
 <section id="left-section" class="w-full md:w-3/5 relative bg-surface-container-lowest p-unit-6 overflow-auto custom-scrollbar">
 
 <!-- Toolbar -->
-<div class="sticky top-0 z-30 mb-unit-6 flex items-center gap-unit-1 bg-white/90 backdrop-blur-md px-3 py-2 rounded-full border border-outline-variant pdf-page-shadow flex-wrap justify-center">
+<div id="floating-toolbar" class="sticky top-0 z-30 mb-unit-6 flex items-center gap-unit-1 bg-white/90 backdrop-blur-md px-3 py-2 rounded-full border border-outline-variant pdf-page-shadow flex-wrap justify-center">
 <button id="toggle-detect-words" class="px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Deteksi semua kata">
 <span class="material-symbols-outlined text-[18px]">auto_awesome</span> Deteksi Kata
 </button>
-<button id="btn-select-all" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Pilih semua kata di halaman aktif">
-<span class="material-symbols-outlined text-[18px]">select_all</span> Select All
+<button id="btn-select-all" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Pilih semua kata di halaman yang sedang aktif saja">
+<span class="material-symbols-outlined text-[18px]">select_all</span> Halaman Ini
+</button>
+<button id="btn-select-all-pages" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Pilih semua kata di SELURUH halaman dokumen">
+<span class="material-symbols-outlined text-[18px]">checklist</span> Semua Halaman
 </button>
 <button id="tool-addtext" class="px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Klik di halaman untuk menambah teks">
 <span class="material-symbols-outlined text-[18px]">title</span> Add Text
@@ -415,7 +418,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -780,18 +783,43 @@
     renderAllOverlays();
   }
 
+  // FIX BUG "indikator halaman lompat/tidak akurat": IntersectionObserver
+  // callback HANYA mengirim entry yg BARU SAJA melewati salah satu threshold
+  // di batch itu -- bukan status semua elemen yg diamati. Kode lama cuma
+  // membandingkan rasio DI DALAM 1 batch, jadi kalau halaman baru (mis. 3)
+  // baru menyentuh threshold sementara halaman lain (mis. 2) masih lebih
+  // banyak terlihat tapi TIDAK ikut dikirim di batch itu, halaman 3 salah
+  // terpilih jadi "aktif". Solusinya: simpan rasio TIAP halaman scr
+  // persisten (Map), update sebagian tiap callback, lalu selalu bandingkan
+  // dari SELURUH peta -- bukan cuma entries yg baru berubah.
+  const pageVisibilityRatios = new Map(); // pageNum -> rasio kemunculan terakhir
+
+  function buildFineThresholds() {
+    const steps = [];
+    for (let i = 0; i <= 20; i += 1) steps.push(i / 20); // 0, 0.05, ..., 1.0
+    return steps;
+  }
+
   function setupPageObserver() {
     if (pageObserver) pageObserver.disconnect();
+    pageVisibilityRatios.clear();
+
     pageObserver = new IntersectionObserver((entries) => {
-      let best = null;
       entries.forEach((entry) => {
-        if (entry.isIntersecting && (!best || entry.intersectionRatio > best.intersectionRatio)) best = entry;
+        const pageNum = parseInt(entry.target.dataset.pageNum, 10);
+        pageVisibilityRatios.set(pageNum, entry.isIntersecting ? entry.intersectionRatio : 0);
       });
-      if (best) {
-        state.activePageNum = parseInt(best.target.dataset.pageNum, 10);
-        document.getElementById('page-indicator').textContent = `Halaman ${state.activePageNum} / ${state.numPages}`;
+
+      let bestPage = null; let bestRatio = 0;
+      pageVisibilityRatios.forEach((ratio, pageNum) => {
+        if (ratio > bestRatio) { bestRatio = ratio; bestPage = pageNum; }
+      });
+      if (bestPage !== null) {
+        state.activePageNum = bestPage;
+        document.getElementById('page-indicator').textContent = `Halaman ${bestPage} / ${state.numPages}`;
       }
-    }, { root: document.getElementById('left-section'), threshold: [0.3, 0.5, 0.7] });
+    }, { root: document.getElementById('left-section'), threshold: buildFineThresholds() });
+
     state.pages.forEach((p) => pageObserver.observe(p.wrapper));
   }
 
@@ -804,6 +832,14 @@
     // batas bawah default (baseline) memotong huruf berekor spt g/p/y/j/q
     // yang menjorok DI BAWAH baseline. Tambahkan padding ~25% dari tinggi
     // font ke bagian bawah kotak supaya descender ikut tercakup penuh.
+    // FIX BUG "huruf awal/akhir kepotong (W, T, dll)": estimasi lebar per-kata
+    // di sini bersifat PROPORSIONAL per-jumlah-karakter (pdf.js tidak
+    // menyediakan lebar per-glyph individual lewat getTextContent()), jadi
+    // huruf yg secara alami lebih LEBAR dari rata-rata (mis. 'W', 'M') bisa
+    // sedikit meleset dari estimasi dan visualnya nongol sedikit di luar
+    // kotak. Tambahkan padding horizontal kecil (3px) di kedua sisi tiap
+    // kotak kata utk mengkompensasi ketidaktepatan estimasi ini.
+    const BOX_PADDING_X = 3;
     const DESCENDER_RATIO = 0.25;
     textContent.items.forEach((item) => {
       if (!item.str || !item.str.trim()) return;
@@ -819,7 +855,14 @@
       words.forEach((chunk) => {
         const chunkWidth = (chunk.length / totalChars) * itemWidth;
         if (chunk.trim().length > 0) {
-          boxes.push({ index: globalIndex++, text: chunk, x: itemX + (charOffset / totalChars) * itemWidth, y: itemY, width: chunkWidth, height: boxHeight });
+          boxes.push({
+            index: globalIndex++,
+            text: chunk,
+            x: itemX + (charOffset / totalChars) * itemWidth - BOX_PADDING_X,
+            y: itemY,
+            width: chunkWidth + BOX_PADDING_X * 2,
+            height: boxHeight,
+          });
         }
         charOffset += chunk.length;
       });
@@ -857,6 +900,7 @@
     state.wordDetectOn = !state.wordDetectOn;
     document.getElementById('toggle-detect-words').classList.toggle('tool-active', state.wordDetectOn);
     setEnabled('btn-select-all', state.wordDetectOn);
+    setEnabled('btn-select-all-pages', state.wordDetectOn);
 
     if (state.wordDetectOn) {
       setLoading(true);
@@ -868,6 +912,7 @@
     renderAllOverlays();
   });
 
+  // "Halaman Ini" -- pilih semua kata di HALAMAN AKTIF saja.
   document.getElementById('btn-select-all').addEventListener('click', () => {
     if (!state.wordDetectOn) return showToast('Aktifkan "Deteksi Kata" dulu.', 'info');
     const pageInfo = getPageInfo(state.activePageNum);
@@ -879,6 +924,24 @@
     });
     renderAllOverlays();
     showToast(`Semua kata di Halaman ${pageInfo.pageNum} dipilih.`, 'success');
+  });
+
+  // "Semua Halaman" -- pilih semua kata di SELURUH halaman dokumen sekaligus.
+  document.getElementById('btn-select-all-pages').addEventListener('click', () => {
+    if (!state.wordDetectOn) return showToast('Aktifkan "Deteksi Kata" dulu.', 'info');
+    let totalAdded = 0;
+    state.pages.forEach((pageInfo) => {
+      const pageIdx = pageInfo.pageNum - 1;
+      pageInfo.wordBoxes.forEach((wb) => {
+        if (!state.selectedAreas.some((a) => a.wordIndex === wb.index && a.page === pageIdx)) {
+          state.selectedAreas.push({ id: 'w' + pageInfo.pageNum + '-' + wb.index, page: pageIdx, wordIndex: wb.index, x: wb.x, y: wb.y, width: wb.width, height: wb.height });
+          totalAdded += 1;
+        }
+      });
+    });
+    if (totalAdded === 0) return showToast('Tidak ada kata terdeteksi di dokumen ini.', 'info');
+    renderAllOverlays();
+    showToast(`${totalAdded} kata dipilih di seluruh ${state.pages.length} halaman.`, 'success');
   });
 
   // ================== OVERLAY RENDERING (per halaman) ==================
@@ -1336,22 +1399,47 @@
     for (let i = 0; i < imgData.data.length; i += 4) { const v = Math.floor(Math.random() * 255); imgData.data[i] = v; imgData.data[i + 1] = v; imgData.data[i + 2] = v; imgData.data[i + 3] = 255; }
     ctx.putImageData(imgData, 0, 0); return out;
   }
-  // FITUR BARU: gaya "Handwriter" -- coretan solid spt ditimpa spidol tangan,
-  // bukan blur. Beberapa goresan horizontal dgn sedikit gelombang & variasi
-  // ketebalan acak supaya terkesan alami/tidak kaku, full-opaque menutupi.
+  // FIX BUG "Handwriter tampil sbg kotak solid, bukan coretan": akar masalah
+  // sebelumnya BUKAN salah pemetaan style (dispatch-nya sudah benar), tapi
+  // lineWidth (8-10px) lebih BESAR dari jarak antar goresan (6px) sehingga
+  // semua garis menyatu jadi 1 blok padat -- persis spt yg dilaporkan.
+  // Sekarang lineWidth sengaja dijaga < jarak antar goresan (masih terlihat
+  // sbg garis terpisah), ditambah lengkungan (bezier) & 2 goresan diagonal
+  // menyilang spt coretan spidol asli. Lapisan dasar semi-opaque tetap
+  // dipasang sbg jaring pengaman supaya redaksi tetap efektif menutupi
+  // walau ada celah kecil di antara goresan.
   function applyHandwriter(src) {
     const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
     const ctx = out.getContext('2d');
-    ctx.fillStyle = '#1b1c1a'; ctx.strokeStyle = '#1b1c1a';
+
+    ctx.fillStyle = 'rgba(43, 33, 24, 0.55)';
+    ctx.fillRect(0, 0, out.width, out.height);
+
+    ctx.strokeStyle = '#2b2118';
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const strokeCount = Math.max(1, Math.round(out.height / 6));
-    for (let i = 0; i < strokeCount; i += 1) {
-      const baseY = (i + 0.5) * (out.height / strokeCount);
-      const y = baseY + (Math.random() - 0.5) * 3;
-      ctx.lineWidth = out.height / strokeCount + 2 + Math.random() * 2;
+
+    const w = out.width; const h = out.height;
+    const layerCount = Math.max(3, Math.round(h / 7));
+    const slot = h / layerCount;
+    for (let i = 0; i < layerCount; i += 1) {
+      const baseY = slot * (i + 0.5);
+      ctx.lineWidth = Math.max(2, slot * 0.6) + Math.random() * 1.5; // sengaja < slot, biar ada celah antar goresan
       ctx.beginPath();
-      ctx.moveTo(-3, y + (Math.random() - 0.5) * 2);
-      ctx.quadraticCurveTo(out.width / 2, y + (Math.random() - 0.5) * 4, out.width + 3, y + (Math.random() - 0.5) * 2);
+      ctx.moveTo(-4, baseY + (Math.random() - 0.5) * slot * 0.4);
+      ctx.bezierCurveTo(
+        w * 0.3, baseY + (Math.random() - 0.5) * slot,
+        w * 0.7, baseY + (Math.random() - 0.5) * slot,
+        w + 4, baseY + (Math.random() - 0.5) * slot * 0.4,
+      );
+      ctx.stroke();
+    }
+    // 2 goresan diagonal menyilang tipis di atas -- kesan coretan tangan asli,
+    // sekaligus menutup celah antar garis horizontal di atas.
+    ctx.lineWidth = Math.max(1.5, h * 0.1);
+    for (let i = 0; i < 2; i += 1) {
+      ctx.beginPath();
+      ctx.moveTo(-4, Math.random() * h);
+      ctx.lineTo(w + 4, Math.random() * h);
       ctx.stroke();
     }
     return out;
@@ -1821,6 +1909,25 @@
     window.addEventListener('resize', () => {
       const currentWidth = parseInt(sidebar.style.width, 10) || 320;
       main.style.paddingLeft = isDesktop() ? currentWidth + 'px' : '';
+    });
+  })();
+
+  // FIX BUG "floating toolbar terpotong saat scroll horizontal": toolbar
+  // pakai position:sticky (top:0) yg cuma menangani sumbu VERTIKAL. Saat
+  // #left-section di-scroll ke SAMPING (mis. krn zoom bikin halaman lebih
+  // lebar dari viewport), toolbar yg di-center via margin:auto tetap diam
+  // di posisi horizontal awalnya dan ikut ter-scroll keluar layar. Di sini
+  // toolbar digeser manual pakai transform:translateX() mengikuti scrollLeft
+  // container, supaya toolbar selalu tetap di tengah layar yg terlihat.
+  (function setupFloatingToolbarHorizontalFollow() {
+    const container = document.getElementById('left-section');
+    const toolbar = document.getElementById('floating-toolbar');
+    const formatBar = document.getElementById('text-format-bar');
+    if (!container) return;
+    container.addEventListener('scroll', () => {
+      const offset = `translateX(${container.scrollLeft}px)`;
+      if (toolbar) toolbar.style.transform = offset;
+      if (formatBar) formatBar.style.transform = offset;
     });
   })();
 
