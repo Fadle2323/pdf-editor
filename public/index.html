@@ -75,6 +75,14 @@
         #text-format-bar,
         #pages-container { margin-left: auto; margin-right: auto; width: fit-content; }
 
+        /* FIX BUG "toolbar getar saat scroll horizontal": hint ke browser
+           supaya elemen ini dipromosikan ke compositor layer sendiri lebih
+           awal, sehingga perubahan transform (translateX mengikuti scroll)
+           tidak perlu repaint ulang seluruh elemen tiap frame -- cuma
+           posisinya saja yg digeser di layer terpisah (jauh lebih murah &
+           mulus drpd tanpa hint ini). */
+        #floating-toolbar, #text-format-bar { will-change: transform; }
+
         #pages-container { display: flex; flex-direction: column; align-items: center; gap: 32px; padding-bottom: 80px; }
         .page-wrapper { position: relative; background: #fff; }
         .page-wrapper canvas { display: block; max-width: none; }
@@ -1399,50 +1407,36 @@
     for (let i = 0; i < imgData.data.length; i += 4) { const v = Math.floor(Math.random() * 255); imgData.data[i] = v; imgData.data[i + 1] = v; imgData.data[i + 2] = v; imgData.data[i + 3] = 255; }
     ctx.putImageData(imgData, 0, 0); return out;
   }
-  // FIX BUG "Handwriter tampil sbg kotak solid, bukan coretan": akar masalah
-  // sebelumnya BUKAN salah pemetaan style (dispatch-nya sudah benar), tapi
-  // lineWidth (8-10px) lebih BESAR dari jarak antar goresan (6px) sehingga
-  // semua garis menyatu jadi 1 blok padat -- persis spt yg dilaporkan.
-  // Sekarang lineWidth sengaja dijaga < jarak antar goresan (masih terlihat
-  // sbg garis terpisah), ditambah lengkungan (bezier) & 2 goresan diagonal
-  // menyilang spt coretan spidol asli. Lapisan dasar semi-opaque tetap
-  // dipasang sbg jaring pengaman supaya redaksi tetap efektif menutupi
-  // walau ada celah kecil di antara goresan.
+  // SISTEM 2-LAYER "Handwritten Blur" (redesain total sesuai spesifikasi):
+  // 1) Layer bawah: background ASLI (piksel crop dokumen, bukan warna
+  //    buatan) di-blur -- meniru backdrop-filter:blur(). Reuse
+  //    applyGaussianBlur yg SUDAH aman dari bug transparansi (isi latar
+  //    opaque hasil sampling dulu sebelum di-blur), jadi teks asli di
+  //    baliknya pasti tertutup & menyatu alami dgn kanvas, bukan blok warna
+  //    buatan yg mencolok.
+  // 2) Layer atas: aksara latin bersambung (Unicode Mathematical Script,
+  //    tampil cursive tanpa perlu font eksternal -- lebih aman utk
+  //    dipakai offline/lokal drpd bergantung ke Google Fonts) digambar
+  //    TAJAM (filter direset ke 'none' secara eksplisit) di atas layer blur.
   function applyHandwriter(src) {
-    const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
-    const ctx = out.getContext('2d');
+    const base = applyGaussianBlur(src, 6); // layer 1: background asli, blur
+    const ctx = base.getContext('2d');
 
-    ctx.fillStyle = 'rgba(43, 33, 24, 0.55)';
-    ctx.fillRect(0, 0, out.width, out.height);
+    // Layer 2: WAJIB filter='none' di sini -- inilah yg menjamin tulisan
+    // tetap tajam & tidak ikut buram spt layer di bawahnya.
+    ctx.filter = 'none';
+    const w = base.width; const h = base.height;
+    const scriptUnit = '\u{1D452}\u{1D4C1}\u{1D4CA}\u{1D4C3}'; // "𝑒𝓁𝓊𝓃" -- pola coretan latin bersambung
+    const fontSize = Math.max(10, h * 0.8);
+    ctx.font = `${fontSize}px Georgia, 'Times New Roman', serif`;
+    ctx.fillStyle = '#2b1d0c';
+    ctx.textBaseline = 'middle';
 
-    ctx.strokeStyle = '#2b2118';
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    let text = '';
+    while (ctx.measureText(text).width < w + fontSize) text += scriptUnit;
+    ctx.fillText(text, 4, h / 2);
 
-    const w = out.width; const h = out.height;
-    const layerCount = Math.max(3, Math.round(h / 7));
-    const slot = h / layerCount;
-    for (let i = 0; i < layerCount; i += 1) {
-      const baseY = slot * (i + 0.5);
-      ctx.lineWidth = Math.max(2, slot * 0.6) + Math.random() * 1.5; // sengaja < slot, biar ada celah antar goresan
-      ctx.beginPath();
-      ctx.moveTo(-4, baseY + (Math.random() - 0.5) * slot * 0.4);
-      ctx.bezierCurveTo(
-        w * 0.3, baseY + (Math.random() - 0.5) * slot,
-        w * 0.7, baseY + (Math.random() - 0.5) * slot,
-        w + 4, baseY + (Math.random() - 0.5) * slot * 0.4,
-      );
-      ctx.stroke();
-    }
-    // 2 goresan diagonal menyilang tipis di atas -- kesan coretan tangan asli,
-    // sekaligus menutup celah antar garis horizontal di atas.
-    ctx.lineWidth = Math.max(1.5, h * 0.1);
-    for (let i = 0; i < 2; i += 1) {
-      ctx.beginPath();
-      ctx.moveTo(-4, Math.random() * h);
-      ctx.lineTo(w + 4, Math.random() * h);
-      ctx.stroke();
-    }
-    return out;
+    return base;
   }
   function processBlurStyle(cropped, style) {
     switch (style) {
@@ -1919,16 +1913,35 @@
   // di posisi horizontal awalnya dan ikut ter-scroll keluar layar. Di sini
   // toolbar digeser manual pakai transform:translateX() mengikuti scrollLeft
   // container, supaya toolbar selalu tetap di tengah layar yg terlihat.
+  //
+  // FIX BUG "toolbar getar-getar saat scroll horizontal" (vertikal aman
+  // krn ditangani native oleh position:sticky, tanpa JS sama sekali --
+  // makanya mulus): update style lewat event 'scroll' polos itu TIDAK
+  // sinkron dgn siklus repaint browser -- event bisa menumpuk/telat
+  // beberapa frame di belakang posisi scroll asli, hasilnya toolbar terlihat
+  // "mengejar" posisi dgn tersendat (jitter). Solusinya: batasi update style
+  // pakai requestAnimationFrame (rAF) supaya paling banyak 1x update per
+  // frame render, persis sinkron dgn siklus repaint -- pola standar utk
+  // scroll-linked animation yg mulus. `will-change: transform` di CSS jg
+  // membantu browser menyiapkan compositor layer lebih awal.
   (function setupFloatingToolbarHorizontalFollow() {
     const container = document.getElementById('left-section');
     const toolbar = document.getElementById('floating-toolbar');
     const formatBar = document.getElementById('text-format-bar');
     if (!container) return;
-    container.addEventListener('scroll', () => {
+
+    let rafPending = false;
+    function applyHorizontalOffset() {
       const offset = `translateX(${container.scrollLeft}px)`;
       if (toolbar) toolbar.style.transform = offset;
       if (formatBar) formatBar.style.transform = offset;
-    });
+      rafPending = false;
+    }
+    container.addEventListener('scroll', () => {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(applyHorizontalOffset);
+    }, { passive: true });
   })();
 
   // ================== INIT ==================
