@@ -426,7 +426,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -1407,45 +1407,75 @@
     for (let i = 0; i < imgData.data.length; i += 4) { const v = Math.floor(Math.random() * 255); imgData.data[i] = v; imgData.data[i + 1] = v; imgData.data[i + 2] = v; imgData.data[i + 3] = 255; }
     ctx.putImageData(imgData, 0, 0); return out;
   }
-  // SISTEM 2-LAYER "Handwritten Blur" (redesain total sesuai spesifikasi):
-  // 1) Layer bawah: background ASLI (piksel crop dokumen, bukan warna
-  //    buatan) di-blur -- meniru backdrop-filter:blur(). Reuse
-  //    applyGaussianBlur yg SUDAH aman dari bug transparansi (isi latar
-  //    opaque hasil sampling dulu sebelum di-blur), jadi teks asli di
-  //    baliknya pasti tertutup & menyatu alami dgn kanvas, bukan blok warna
-  //    buatan yg mencolok.
-  // 2) Layer atas: aksara latin bersambung (Unicode Mathematical Script,
-  //    tampil cursive tanpa perlu font eksternal -- lebih aman utk
-  //    dipakai offline/lokal drpd bergantung ke Google Fonts) digambar
-  //    TAJAM (filter direset ke 'none' secara eksplisit) di atas layer blur.
-  function applyHandwriter(src) {
-    const base = applyGaussianBlur(src, 6); // layer 1: background asli, blur
-    const ctx = base.getContext('2d');
+  // SISTEM 2-LAYER "Handwritten Blur" (revisi total sesuai spesifikasi):
+  // 1) Layer bawah: warna dasar SENADA KERTAS ASLI (sampling dgn logika yg
+  //    SAMA persis dgn Delete Text -- lihat sampleSurroundingColor di bawah)
+  //    + blur ringan di atasnya. Bukan lagi blur dari piksel teks asli
+  //    (versi sebelumnya), krn hasilnya bisa mewarisi bentuk buram teksnya;
+  //    sekarang benar2 warna solid senada dokumen dulu, baru diblur.
+  // 2) Layer atas: garis coretan BERGELOMBANG (bukan karakter Unicode lagi)
+  //    digambar langsung pakai path canvas -- lebih mirip coretan tangan
+  //    asli spt referensi gambar. TAJAM (filter='none' eksplisit).
+  //
+  // Catatan: fungsi ini butuh `pageInfo` & `area` (posisi asli di kanvas)
+  // utk bisa sampling warna sekitarnya -- dikirim dari processBlurStyle().
+  function drawWavyScribbleLine(ctx, w, h, color) {
+    ctx.filter = 'none'; // WAJIB: layer ini tidak boleh ikut ter-blur
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, h * 0.12);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-    // Layer 2: WAJIB filter='none' di sini -- inilah yg menjamin tulisan
-    // tetap tajam & tidak ikut buram spt layer di bawahnya.
-    ctx.filter = 'none';
-    const w = base.width; const h = base.height;
-    const scriptUnit = '\u{1D452}\u{1D4C1}\u{1D4CA}\u{1D4C3}'; // "𝑒𝓁𝓊𝓃" -- pola coretan latin bersambung
-    const fontSize = Math.max(10, h * 0.8);
-    ctx.font = `${fontSize}px Georgia, 'Times New Roman', serif`;
-    ctx.fillStyle = '#2b1d0c';
-    ctx.textBaseline = 'middle';
+    const midY = h / 2;
+    const amplitude = h * 0.28;
+    const waveLength = Math.max(14, h * 1.1);
 
-    let text = '';
-    while (ctx.measureText(text).width < w + fontSize) text += scriptUnit;
-    ctx.fillText(text, 4, h / 2);
-
-    return base;
+    ctx.beginPath();
+    let x = -waveLength * 0.25;
+    ctx.moveTo(x, midY);
+    let goingUp = true;
+    while (x < w + waveLength) {
+      const nextX = x + waveLength / 2;
+      const controlX = x + waveLength / 4;
+      const peakY = goingUp ? midY - amplitude : midY + amplitude;
+      ctx.quadraticCurveTo(controlX, peakY, nextX, midY);
+      x = nextX;
+      goingUp = !goingUp;
+    }
+    ctx.stroke();
   }
-  function processBlurStyle(cropped, style) {
+
+  function applyHandwriter(src, pageInfo, area) {
+    const w = src.width; const h = src.height;
+
+    // Canvas sementara: warna dasar polos senada kertas (sampling spt Delete
+    // Text kalau info posisi tersedia, fallback krem netral kalau tidak).
+    const baseTemp = document.createElement('canvas'); baseTemp.width = w; baseTemp.height = h;
+    const baseCtx = baseTemp.getContext('2d');
+    const bgColor = (pageInfo && area) ? sampleSurroundingColor(pageInfo, area) : '#f2e8dc';
+    baseCtx.fillStyle = bgColor;
+    baseCtx.fillRect(0, 0, w, h);
+
+    // Layer 1 (blur) digambar ke canvas akhir, lalu Layer 2 (garis tajam)
+    // ditimpakan di atasnya dgn filter direset ke 'none'.
+    const out = document.createElement('canvas'); out.width = w; out.height = h;
+    const ctx = out.getContext('2d');
+    ctx.filter = 'blur(3px)';
+    ctx.drawImage(baseTemp, 0, 0);
+    ctx.filter = 'none';
+
+    drawWavyScribbleLine(ctx, w, h, '#261c14');
+
+    return out;
+  }
+  function processBlurStyle(cropped, style, pageInfo, area) {
     switch (style) {
       case 'strong': return applyGaussianBlur(cropped, 14);
       case 'pixelate': return applyPixelate(cropped, 0.12);
       case 'mosaic': return applyPixelate(cropped, 0.04);
       case 'black': return applySolidBlack(cropped);
       case 'noise': return applyNoise(cropped);
-      case 'handwriter': return applyHandwriter(cropped);
+      case 'handwriter': return applyHandwriter(cropped, pageInfo, area);
       default: return applyGaussianBlur(cropped, 4);
     }
   }
@@ -1511,6 +1541,28 @@
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
 
+  // FIX BUG "sensor menyatukan beberapa kata jadi 1 blok memanjang": kalau
+  // area yg dipilih adalah SNIP MANUAL (drag bebas, bukan hasil klik kata
+  // satu-satu), dan mencakup beberapa kata sekaligus, sebelumnya diproses
+  // sbg SATU rectangle utuh -- style bertekstur spt Handwriter jadi melar
+  // tidak wajar. Fungsi ini memecahnya jadi beberapa area per-kata dgn
+  // memanfaatkan data bounding box yg SUDAH ADA dari fitur Deteksi Kata
+  // (tidak perlu OCR/pemrosesan tambahan) -- kata yg TITIK TENGAHNYA berada
+  // di dalam area snip dianggap "tercakup". Kalau Deteksi Kata belum aktif
+  // utk halaman itu (tidak ada data kata), atau area memang cuma 1 kata
+  // hasil klik langsung, dikembalikan apa adanya (fallback aman).
+  function splitAreaIntoWordRects(pageInfo, area) {
+    if (area.wordIndex !== undefined) return [area];
+    if (!pageInfo || !pageInfo.wordBoxes || !pageInfo.wordBoxes.length) return [area];
+
+    const matches = pageInfo.wordBoxes.filter((wb) => {
+      const cx = wb.x + wb.width / 2;
+      const cy = wb.y + wb.height / 2;
+      return cx >= area.x && cx <= area.x + area.width && cy >= area.y && cy <= area.y + area.height;
+    });
+    return matches.length ? matches : [area];
+  }
+
   // ================== AKSI: BLUR (lintas halaman sekaligus) ==================
   document.getElementById('btn-blur-selection').addEventListener('click', async () => {
     if (!state.selectedAreas.length) return;
@@ -1518,16 +1570,22 @@
     const style = document.getElementById('blur-style').value;
     setLoading(true);
     try {
-      const patches = state.selectedAreas.map((a) => {
+      const expandedAreas = [];
+      state.selectedAreas.forEach((a) => {
+        const pageInfo = getPageInfo(a.page + 1);
+        splitAreaIntoWordRects(pageInfo, a).forEach((rect) => expandedAreas.push({ ...rect, page: a.page }));
+      });
+
+      const patches = expandedAreas.map((a) => {
         const pageInfo = getPageInfo(a.page + 1);
         const cropped = cropCanvasRegion(pageInfo, a);
-        const processed = processBlurStyle(cropped, style);
+        const processed = processBlurStyle(cropped, style, pageInfo, a);
         return { page: a.page, ...canvasRectToPdfRect(pageInfo, a), imageBase64: processed.toDataURL('image/png') };
       });
       const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), patches }) });
       pushHistory(data.filename, `Blur diterapkan: ${document.getElementById('blur-style').selectedOptions[0].textContent} (${patches.length} area)`);
       await loadPdfFromServer(data.filename);
-      showToast(`${patches.length} area terpilih berhasil di-blur.`, 'success');
+      showToast(`${patches.length} area berhasil di-blur (dipecah per-kata jika perlu).`, 'success');
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
 
