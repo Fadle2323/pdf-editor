@@ -295,6 +295,9 @@
 <button id="tool-esign" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Buat & tempel tanda tangan">
 <span class="material-symbols-outlined text-[18px]">draw</span> E-Sign
 </button>
+<button id="btn-auto-redact" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Deteksi & pilih otomatis kata yg terindikasi data sensitif (NIK, telepon, email, tanggal lahir, NPWP, plat nomor, dll)">
+<span class="material-symbols-outlined text-[18px]">security</span> Auto-Redact
+</button>
 <div class="h-4 w-px bg-outline-variant"></div>
 <button id="btn-undo" class="btn-disabled p-2 rounded-full hover:bg-surface-variant" title="Undo">
 <span class="material-symbols-outlined text-[18px]">undo</span>
@@ -426,7 +429,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -480,6 +483,10 @@
 (function () {
   const API_BASE = '/api';
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  // Padding horizontal kompensasi estimasi lebar kata (fix huruf W/T kepotong)
+  // -- dipakai bersama oleh computeWordBoxesForPage() & applyMinGapSpacing().
+  const BOX_PADDING_X = 3;
 
   const FONT_CSS_MAP = {
     Helvetica: 'Arial, Helvetica, sans-serif',
@@ -782,6 +789,7 @@
     document.getElementById('status-pages').textContent = state.numPages;
     setEnabled('btn-zoom-in', true);
     setEnabled('btn-zoom-out', true);
+    setEnabled('btn-auto-redact', true); // murni client-side, tak perlu tunggu backend
     updateZoomIndicator();
     setupPageObserver();
 
@@ -847,7 +855,6 @@
     // sedikit meleset dari estimasi dan visualnya nongol sedikit di luar
     // kotak. Tambahkan padding horizontal kecil (3px) di kedua sisi tiap
     // kotak kata utk mengkompensasi ketidaktepatan estimasi ini.
-    const BOX_PADDING_X = 3;
     const DESCENDER_RATIO = 0.25;
     textContent.items.forEach((item) => {
       if (!item.str || !item.str.trim()) return;
@@ -950,6 +957,111 @@
     if (totalAdded === 0) return showToast('Tidak ada kata terdeteksi di dokumen ini.', 'info');
     renderAllOverlays();
     showToast(`${totalAdded} kata dipilih di seluruh ${state.pages.length} halaman.`, 'success');
+  });
+
+  // ================== AUTO-REDACT: deteksi otomatis data sensitif ==================
+  // Pattern per-kategori. Alamat, tanggal lahir, NPWP, dan plat nomor secara
+  // alami terdiri dari BEBERAPA token kata sekaligus, jadi pencocokan
+  // dilakukan di level BARIS (rekonstruksi teks per-baris dari wordBoxes),
+  // bukan per-kata tunggal -- supaya entitas multi-kata tetap terdeteksi utuh.
+  const SENSITIVE_PATTERNS = {
+    nik: /\b\d{16}\b/g,
+    phone: /(\+62|62|0)8[1-9][0-9]{7,11}\b/g,
+    email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    currency: /(Rp\.?|IDR)\s*[\d.,]+/gi,
+    address: /\b(Jalan|Jl\.?)\s+[^.]*?(?=\.|$)/gi,
+    addressKeyword: /\b(Kelurahan|Kecamatan|Kabupaten|Kota|Provinsi|RT\s?\/?\s?RW)\b[^.]*?(?=\.|$)/gi,
+    dob: /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g,
+    npwp: /\b\d{2}\.\d{3}\.\d{3}\.\d{1}-\d{3}\.\d{3}\b/g,
+    plate: /\b[A-Z]{1,2}\s\d{1,4}\s[A-Z]{1,3}\b/g,
+  };
+
+  // Kelompokkan wordBoxes jadi baris (posisi y berdekatan), lalu rekonstruksi
+  // teksnya + simpan rentang karakter [start,end) tiap kata di dalamnya --
+  // supaya hasil match regex multi-kata bisa dipetakan balik ke wordBox asal.
+  function groupWordBoxesIntoLines(wordBoxes, tolerance = 8) {
+    const sorted = [...wordBoxes].sort((a, b) => a.y - b.y || a.x - b.x);
+    const lines = [];
+    sorted.forEach((wb) => {
+      let line = lines.find((l) => Math.abs(l.y - wb.y) <= tolerance);
+      if (!line) { line = { y: wb.y, words: [] }; lines.push(line); }
+      line.words.push(wb);
+    });
+    return lines.map((line) => {
+      line.words.sort((a, b) => a.x - b.x);
+      let cursor = 0; let text = '';
+      const offsets = [];
+      line.words.forEach((w, i) => {
+        if (i > 0) { text += ' '; cursor += 1; }
+        const start = cursor;
+        text += w.text;
+        cursor += w.text.length;
+        offsets.push({ wb: w, start, end: cursor });
+      });
+      return { text, offsets };
+    });
+  }
+
+  function findSensitiveWordsOnPage(pageInfo) {
+    const lines = groupWordBoxesIntoLines(pageInfo.wordBoxes);
+    const matchedSet = new Set();
+    lines.forEach((line) => {
+      Object.values(SENSITIVE_PATTERNS).forEach((pattern) => {
+        pattern.lastIndex = 0;
+        let m = pattern.exec(line.text);
+        while (m !== null) {
+          const matchStart = m.index; const matchEnd = m.index + m[0].length;
+          line.offsets.forEach((o) => {
+            const overlaps = !(o.end <= matchStart || o.start >= matchEnd);
+            if (overlaps) matchedSet.add(o.wb);
+          });
+          if (m[0].length === 0) pattern.lastIndex += 1;
+          m = pattern.exec(line.text);
+        }
+      });
+    });
+    return [...matchedSet];
+  }
+
+  // Catatan desain: berbeda dari referensi (yg langsung menerapkan blur
+  // otomatis tanpa jeda), di sini Auto-Redact HANYA MEMILIH kata yg
+  // terindikasi sensitif -- belum langsung mem-blur. Ini supaya user bisa
+  // meninjau dulu (false positive selalu mungkin utk deteksi berbasis
+  // regex) sebelum benar-benar menekan tombol Blur, konsisten dgn pola
+  // "pilih dulu, baru terapkan" yg dipakai fitur seleksi lain di aplikasi.
+  document.getElementById('btn-auto-redact').addEventListener('click', async () => {
+    if (!state.pages.length) return;
+    setLoading(true);
+    try {
+      for (const p of state.pages) {
+        if (!p.wordBoxes || !p.wordBoxes.length) await computeWordBoxesForPage(p); // eslint-disable-line no-await-in-loop
+      }
+      if (!state.wordDetectOn) {
+        state.wordDetectOn = true;
+        document.getElementById('toggle-detect-words').classList.add('tool-active');
+        setEnabled('btn-select-all', true);
+        setEnabled('btn-select-all-pages', true);
+      }
+
+      let totalFound = 0;
+      state.pages.forEach((pageInfo) => {
+        const pageIdx = pageInfo.pageNum - 1;
+        findSensitiveWordsOnPage(pageInfo).forEach((wb) => {
+          if (!state.selectedAreas.some((a) => a.wordIndex === wb.index && a.page === pageIdx)) {
+            state.selectedAreas.push({ id: 'w' + pageInfo.pageNum + '-' + wb.index, page: pageIdx, wordIndex: wb.index, x: wb.x, y: wb.y, width: wb.width, height: wb.height });
+            totalFound += 1;
+          }
+        });
+      });
+
+      renderAllOverlays();
+      if (totalFound > 0) {
+        showToast(`${totalFound} kata terindikasi data sensitif (NIK/telepon/email/dll) sudah dipilih. Tinjau lalu klik "Blur" utk menerapkan.`, 'success');
+      } else {
+        showToast('Tidak ditemukan pola data sensitif pada dokumen ini.', 'info');
+      }
+    } catch (err) { console.error(err); showToast('Gagal menjalankan deteksi otomatis: ' + err.message, 'error'); }
+    finally { setLoading(false); }
   });
 
   // ================== OVERLAY RENDERING (per halaman) ==================
@@ -1421,6 +1533,16 @@
   // utk bisa sampling warna sekitarnya -- dikirim dari processBlurStyle().
   function drawWavyScribbleLine(ctx, w, h, color) {
     ctx.filter = 'none'; // WAJIB: layer ini tidak boleh ikut ter-blur
+    ctx.save();
+
+    // Variasi organik ringan per kata: rotasi sangat tipis (±0.4deg) +
+    // pergeseran fase gelombang acak -- supaya antar kata yg sama-sama
+    // di-handwriter tidak terlihat identik/kaku mekanis.
+    const rotationDeg = (Math.random() - 0.5) * 0.8;
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate((rotationDeg * Math.PI) / 180);
+    ctx.translate(-w / 2, -h / 2);
+
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(2, h * 0.12);
     ctx.lineCap = 'round';
@@ -1429,9 +1551,10 @@
     const midY = h / 2;
     const amplitude = h * 0.28;
     const waveLength = Math.max(14, h * 1.1);
+    const phaseShift = Math.random() * waveLength * 0.3;
 
     ctx.beginPath();
-    let x = -waveLength * 0.25;
+    let x = -waveLength * 0.25 - phaseShift;
     ctx.moveTo(x, midY);
     let goingUp = true;
     while (x < w + waveLength) {
@@ -1443,6 +1566,7 @@
       goingUp = !goingUp;
     }
     ctx.stroke();
+    ctx.restore();
   }
 
   function applyHandwriter(src, pageInfo, area) {
@@ -1541,26 +1665,70 @@
     } catch (err) { console.error(err); } finally { setLoading(false); }
   });
 
-  // FIX BUG "sensor menyatukan beberapa kata jadi 1 blok memanjang": kalau
-  // area yg dipilih adalah SNIP MANUAL (drag bebas, bukan hasil klik kata
-  // satu-satu), dan mencakup beberapa kata sekaligus, sebelumnya diproses
-  // sbg SATU rectangle utuh -- style bertekstur spt Handwriter jadi melar
-  // tidak wajar. Fungsi ini memecahnya jadi beberapa area per-kata dgn
-  // memanfaatkan data bounding box yg SUDAH ADA dari fitur Deteksi Kata
-  // (tidak perlu OCR/pemrosesan tambahan) -- kata yg TITIK TENGAHNYA berada
-  // di dalam area snip dianggap "tercakup". Kalau Deteksi Kata belum aktif
-  // utk halaman itu (tidak ada data kata), atau area memang cuma 1 kata
-  // hasil klik langsung, dikembalikan apa adanya (fallback aman).
-  function splitAreaIntoWordRects(pageInfo, area) {
+  // FIX BUG UTAMA "snipping manual masih jadi 1 blok besar meski ada
+  // beberapa kata": versi sebelumnya HANYA memecah per-kata KALAU
+  // pageInfo.wordBoxes sudah terisi -- yang cuma terjadi kalau toggle
+  // "Deteksi Kata" sudah pernah diaktifkan user. Kalau user langsung snip
+  // manual TANPA menyalakan toggle itu dulu, wordBoxes kosong, dan fungsi
+  // lama fallback ke 1 blok utuh -- persis bug yang dilaporkan.
+  //
+  // Sekarang: kalau wordBoxes utk halaman itu belum ada, HITUNG DULU on-the-
+  // fly di sini (tidak lagi bergantung toggle manual). Kriteria "kata
+  // tercakup" juga diganti dari "titik tengah di dalam area" jadi AABB
+  // collision penuh (bounding box kata BERSINGGUNGAN dgn area snip) --
+  // lebih toleran, kata yg sebagian besar tercakup snip tetap ikut kepilih.
+  async function splitAreaIntoWordRects(pageInfo, area) {
     if (area.wordIndex !== undefined) return [area];
-    if (!pageInfo || !pageInfo.wordBoxes || !pageInfo.wordBoxes.length) return [area];
+    if (!pageInfo) return [area];
 
-    const matches = pageInfo.wordBoxes.filter((wb) => {
-      const cx = wb.x + wb.width / 2;
-      const cy = wb.y + wb.height / 2;
-      return cx >= area.x && cx <= area.x + area.width && cy >= area.y && cy <= area.y + area.height;
-    });
+    if (!pageInfo.wordBoxes || !pageInfo.wordBoxes.length) {
+      await computeWordBoxesForPage(pageInfo);
+    }
+    if (!pageInfo.wordBoxes || !pageInfo.wordBoxes.length) return [area]; // halaman memang tanpa teks (mis. gambar)
+
+    const matches = pageInfo.wordBoxes.filter((wb) => !(
+      area.x > wb.x + wb.width
+      || area.x + area.width < wb.x
+      || area.y > wb.y + wb.height
+      || area.y + area.height < wb.y
+    ));
     return matches.length ? matches : [area];
+  }
+
+  // FIX "sensor kata bersebelahan menempel jadi 1 balok lagi": walau sudah
+  // dipecah per-kata, kalau box-nya saling menempel persis (mis. hasil snip
+  // yg mencakup beberapa kata rapat), style bertekstur spt Handwriter tetap
+  // terlihat menyatu. Kelompokkan per BARIS (posisi y berdekatan), lalu
+  // pastikan ada celah minimum antar box yg bertetangga -- dipangkas
+  // simetris, dibatasi supaya TIDAK PERNAH memakan area kata aslinya
+  // (batas aman = padding yg sudah ditambahkan saat deteksi kata).
+  function applyMinGapSpacing(rects, minGap = 3) {
+    const lineTolerance = 8;
+    const lines = [];
+    rects.forEach((r) => {
+      let line = lines.find((l) => Math.abs(l.y - r.y) <= lineTolerance);
+      if (!line) { line = { y: r.y, items: [] }; lines.push(line); }
+      line.items.push(r);
+    });
+
+    const maxShrinkPerSide = Math.max(0, BOX_PADDING_X - 0.5); // sisakan buffer kecil, jangan sampai memakan huruf asli
+
+    lines.forEach((line) => {
+      line.items.sort((a, b) => a.x - b.x);
+      for (let i = 0; i < line.items.length - 1; i += 1) {
+        const cur = line.items[i];
+        const next = line.items[i + 1];
+        const curRight = cur.x + cur.width;
+        const gap = next.x - curRight;
+        if (gap < minGap) {
+          const shrinkEach = Math.min((minGap - gap) / 2, maxShrinkPerSide);
+          cur.width -= shrinkEach;
+          next.x += shrinkEach;
+          next.width -= shrinkEach;
+        }
+      }
+    });
+    return rects;
   }
 
   // ================== AKSI: BLUR (lintas halaman sekaligus) ==================
@@ -1570,11 +1738,24 @@
     const style = document.getElementById('blur-style').value;
     setLoading(true);
     try {
-      const expandedAreas = [];
-      state.selectedAreas.forEach((a) => {
-        const pageInfo = getPageInfo(a.page + 1);
-        splitAreaIntoWordRects(pageInfo, a).forEach((rect) => expandedAreas.push({ ...rect, page: a.page }));
+      // 1) Pecah tiap area jadi per-kata (async: hitung word boxes on-the-fly
+      //    kalau perlu, tidak lagi bergantung toggle Deteksi Kata).
+      let expandedAreas = [];
+      for (const a of state.selectedAreas) {
+        const pageInfo = getPageInfo(a.page + 1); // eslint-disable-line no-await-in-loop
+        const rects = await splitAreaIntoWordRects(pageInfo, a); // eslint-disable-line no-await-in-loop
+        rects.forEach((rect) => expandedAreas.push({ ...rect, page: a.page }));
+      }
+
+      // 2) Terapkan min-gap spacing per halaman, supaya kata-kata bersebelahan
+      //    hasil pemecahan di atas tidak menempel jadi 1 balok lagi.
+      const byPage = new Map();
+      expandedAreas.forEach((a) => {
+        if (!byPage.has(a.page)) byPage.set(a.page, []);
+        byPage.get(a.page).push(a);
       });
+      byPage.forEach((rects) => applyMinGapSpacing(rects, 3));
+      expandedAreas = [...byPage.values()].flat();
 
       const patches = expandedAreas.map((a) => {
         const pageInfo = getPageInfo(a.page + 1);
