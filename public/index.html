@@ -444,7 +444,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -1652,14 +1652,19 @@
   //     terlihat rapi/mekanis, sama sekali tidak asimetris.
   // v2: ditambah Math.random() pada amplitude/panjang segmen -- ternyata
   //     TETAP terlihat "sama" krn tiap kata cuma kanvas kecil dgn ruang utk
-  //     1-2 lekukan gelombang; seacak apapun parameternya, bentuk dasarnya
-  //     (kurva sinus halus naik-turun beraturan) tetap terasa seragam.
-  // v3 (sekarang): pendekatan diganti total -- bukan kurva sinus periodik,
-  //     tapi rangkaian titik acak independen (jumlah lekukan proporsional
-  //     lebar kata, arah & tinggi tiap titik diacak sendiri2, ketebalan
-  //     garis bervariasi spt tekanan pena, sesekali ada coretan kecil
-  //     tumpang tindih). Hasilnya scr matematis benar2 berbeda antar kata,
-  //     bukan cuma ganti angka di rumus yg sama.
+  //     1-2 lekukan gelombang.
+  // v3: diganti jadi titik acak independen dgn lekukan besar tak beraturan --
+  //     scr matematis terbukti beda antar kata (MD5 pixel berbeda), TAPI
+  //     hasilnya jadi coretan besar/renggang yg tidak sesuai referensi visual
+  //     yg diinginkan (dibandingkan preview HTML "word-level-wavy-censor-v7"
+  //     sebelumnya, yg polanya rapat & konsisten spt tinta pena redaksi
+  //     sungguhan, bukan coretan besar).
+  // v4 (sekarang): kembali ke pola RAPAT & KONSISTEN spt tile SVG di preview
+  //     v7 (wavelength & amplitude proporsional tinggi kata, mirip rasio
+  //     17:20 pada tile referensi), tapi TETAP ada variasi kecil per kata
+  //     (pergeseran fase acak, rotasi sangat tipis, amplitude jitter kecil)
+  //     via drawWavyScribbleLine -- supaya tidak identik 100% antar kata
+  //     tanpa jadi lekukan besar yg menyimpang dari referensi visual.
   function drawWavyScribbleLine(ctx, w, h, color) {
     ctx.save();
     // Clip ke area kotak kata -- WAJIB, supaya variasi organik di bawah
@@ -1672,72 +1677,37 @@
     ctx.strokeStyle = color;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1.3, h * 0.09);
 
     const midY = h / 2;
-    const baseAmp = h * 0.3;
-    const baseLineWidth = Math.max(1.6, h * 0.1);
 
-    // Rotasi tipis acak per kata (~ ±2.5°) -- kesan "tidak pernah benar2
-    // lurus", spt tulisan tangan asli. Aman krn sudah di-clip di atas.
+    // Rotasi SANGAT tipis (~ ±0.7°) -- kesan alami tanpa mengubah kerapatan
+    // gelombang scr signifikan (beda dari v3 yg rotasinya lebih besar).
     ctx.translate(w / 2, midY);
-    ctx.rotate((Math.random() * 2 - 1) * 0.045);
+    ctx.rotate((Math.random() * 2 - 1) * 0.012);
     ctx.translate(-w / 2, -midY);
 
-    // Jumlah "lekukan" proporsional thd lebar kata (kata pendek = sedikit
-    // lekukan besar; kata panjang = banyak lekukan lebih rapat) -- INI yg
-    // sebelumnya tidak ada; dulu jarak antar lekukan konstan (h*1.1) terlepas
-    // seberapa lebar katanya.
-    const targetSegs = Math.max(2, Math.round((w / h) * (1.1 + Math.random() * 0.7)));
-    const segLen = w / targetSegs;
+    // Amplitude & wavelength proporsional thd TINGGI kata (bukan lebar),
+    // mengikuti rasio tile referensi (viewBox 34x20, amplitude ~22-30% dari
+    // tinggi, wavelength ~0.8-1.0x tinggi) -- inilah yg membuat pola rapat &
+    // konsisten spt tinta pena redaksi, bukan lekukan besar renggang.
+    const amp = h * (0.22 + Math.random() * 0.08);
+    const wavelength = h * (0.82 + Math.random() * 0.22);
+    const phaseShift = Math.random() * wavelength; // pergeseran fase acak per kata (spt --shift di v7)
 
-    // Bangun titik-titik kontrol dgn jitter independen di X & Y -- bukan
-    // pola naik-turun beraturan (goingUp yg selalu bergantian), tapi tinggi
-    // & arah tiap titik diacak sendiri2 (kadang dua lekukan searah
-    // berturut-turut, kadang satu lekukan jauh lebih tinggi dari yg lain --
-    // persis spt coretan tangan asli yg tidak simetris).
-    const points = [{ x: -segLen * 0.3, y: midY + (Math.random() * 2 - 1) * h * 0.06 }];
-    for (let i = 1; i <= targetSegs; i += 1) {
-      const x = points[0].x + i * segLen * (0.85 + Math.random() * 0.3);
-      const sign = Math.random() < 0.5 ? -1 : 1;
-      const amp = baseAmp * (0.45 + Math.random() * 0.95); // rentang lebar: lekukan kecil s/d besar
-      points.push({ x, y: midY + sign * amp });
-    }
-    points.push({ x: w + segLen * 0.3, y: midY + (Math.random() * 2 - 1) * h * 0.06 });
-
-    // Gambar via quadratic curve antar titik tengah berurutan (Catmull-Rom
-    // sederhana) supaya tetap mulus tapi mengikuti titik2 acak di atas --
-    // BUKAN kurva sinus periodik lagi.
     ctx.beginPath();
-    ctx.lineWidth = baseLineWidth * (0.8 + Math.random() * 0.4);
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const p0 = points[i]; const p1 = points[i + 1];
-      const midX = (p0.x + p1.x) / 2; const midYSeg = (p0.y + p1.y) / 2;
-      ctx.quadraticCurveTo(p0.x, p0.y, midX, midYSeg);
-      // variasi ketebalan garis sepanjang stroke (efek tekanan pena) --
-      // digambar per-segmen krn canvas tidak mendukung lineWidth gradasi
-      // dlm satu path.
-      if (Math.random() < 0.3) ctx.lineWidth = baseLineWidth * (0.7 + Math.random() * 0.6);
+    let x = -phaseShift;
+    let up = Math.random() < 0.5;
+    ctx.moveTo(x, midY + (Math.random() * 2 - 1) * h * 0.02);
+    while (x < w + wavelength) {
+      const nextX = x + wavelength / 2;
+      const controlX = x + wavelength / 4;
+      const peakY = (up ? midY - amp : midY + amp) + (Math.random() * 2 - 1) * h * 0.025;
+      ctx.quadraticCurveTo(controlX, peakY, nextX, midY + (Math.random() * 2 - 1) * h * 0.02);
+      x = nextX;
+      up = !up;
     }
-    ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
     ctx.stroke();
-
-    // Sesekali (bukan selalu) tambahkan 1 coretan kecil ekstra yg sedikit
-    // tumpang tindih -- spt saat orang mencoret dgn 2 goresan pena, tidak
-    // pernah 1 goresan tunggal yg sempurna. Probabilitas rendah supaya tetap
-    // ringkas & tidak berlebihan.
-    if (Math.random() < 0.35 && points.length >= 3) {
-      const a = points[Math.floor(Math.random() * (points.length - 2))];
-      const b = points[Math.floor(Math.random() * (points.length - 2)) + 1];
-      ctx.beginPath();
-      ctx.lineWidth = baseLineWidth * (0.5 + Math.random() * 0.4);
-      ctx.globalAlpha = 0.75;
-      ctx.moveTo(a.x, a.y + (Math.random() * 2 - 1) * h * 0.08);
-      ctx.quadraticCurveTo((a.x + b.x) / 2, midY + (Math.random() * 2 - 1) * baseAmp * 0.6, b.x, b.y + (Math.random() * 2 - 1) * h * 0.08);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-
     ctx.restore();
   }
 
@@ -1785,13 +1755,23 @@
   // situ -- bukan inpainting AI penuh, tapi cukup akurat utk latar solid/
   // nyaris-solid (kasus paling umum) tanpa perlu library image processing
   // tambahan.
+  // FIX: dulu warna latar dihitung dari RATA-RATA (mean) seluruh titik
+  // sampel di sekitar area -- kalau di sekelilingnya ada campuran warna
+  // (mis. sebagian besar putih/krem polos, tapi sebagian kecil kena garis
+  // tabel/grafis tipis), rata-rata bisa melenceng jadi warna "blasteran"
+  // yg tidak benar2 mewakili warna kertas/latar aslinya. Sekarang dipakai
+  // MODUS/DOMINAN: tiap sampel dikelompokkan ke bucket warna (dibulatkan
+  // per kelipatan 12 tiap kanal R/G/B), bucket dgn ANGGOTA TERBANYAK
+  // dianggap warna latar yg dominan, lalu nilai akhir dirata-ratakan HANYA
+  // dari anggota bucket pemenang itu (supaya hasilnya tetap halus, bukan
+  // warna bucket yg kasar/terkuantisasi).
   function sampleSurroundingColor(pageInfo, rect) {
     const canvas = pageInfo.canvas;
     const ctx = canvas.getContext('2d');
     const margin = 4;
     const w = Math.max(1, Math.round(rect.width));
     const h = Math.max(1, Math.round(rect.height));
-    const steps = 8;
+    const steps = 10;
     const points = [];
     for (let i = 0; i <= steps; i += 1) {
       const dx = (w / steps) * i;
@@ -1804,17 +1784,27 @@
       points.push([rect.x + w + margin, rect.y + dy]);
     }
 
-    let r = 0; let g = 0; let b = 0; let count = 0;
+    const BUCKET = 12;
+    const buckets = new Map();
     points.forEach(([px, py]) => {
       const cx = Math.max(0, Math.min(canvas.width - 1, Math.round(px)));
       const cy = Math.max(0, Math.min(canvas.height - 1, Math.round(py)));
       try {
         const d = ctx.getImageData(cx, cy, 1, 1).data;
-        r += d[0]; g += d[1]; b += d[2]; count += 1;
+        const key = `${Math.round(d[0] / BUCKET)}_${Math.round(d[1] / BUCKET)}_${Math.round(d[2] / BUCKET)}`;
+        let bucket = buckets.get(key);
+        if (!bucket) { bucket = { r: 0, g: 0, b: 0, count: 0 }; buckets.set(key, bucket); }
+        bucket.r += d[0]; bucket.g += d[1]; bucket.b += d[2]; bucket.count += 1;
       } catch (e) { /* abaikan titik yg gagal dibaca */ }
     });
-    if (count === 0) return '#ffffff';
-    r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
+
+    if (buckets.size === 0) return '#ffffff';
+    let winner = null;
+    buckets.forEach((bucket) => { if (!winner || bucket.count > winner.count) winner = bucket; });
+
+    const r = Math.round(winner.r / winner.count);
+    const g = Math.round(winner.g / winner.count);
+    const b = Math.round(winner.b / winner.count);
     const toHex = (v) => v.toString(16).padStart(2, '0');
     return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   }
