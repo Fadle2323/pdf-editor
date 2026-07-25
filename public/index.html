@@ -444,7 +444,7 @@
 <span class="font-label-sm hidden sm:inline">Size: <span class="font-medium" id="status-size">-</span></span>
 <span class="font-label-sm">Pages: <span class="font-medium" id="status-pages">-</span></span>
 </div>
-<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta. Runs 100% locally — no database.</span>
+<span id="footer-copyright" class="font-label-sm text-on-secondary-fixed-variant whitespace-nowrap">© 2026 Scripta.</span>
 </footer>
 
 <div id="toast-container"></div>
@@ -1662,32 +1662,51 @@
   //
   // dgn --rot = (Math.random()*0.8-0.4) dan --shift = Math.round(Math.random()*8)
   // persis spt applyWordLevelHandwrittenBlur() di v7. Krn tujuan akhirnya
-  // adalah GAMBAR RASTER (bukan elemen HTML hidup), pendekatan paling setia
-  // adalah me-render SVG yg SAMA PERSIS sbg <img>, lalu di-tile manual di
-  // kanvas mengikuti rumus background-repeat/background-position CSS di
-  // atas apa adanya -- bukan menggambar ulang gelombang pakai kurva sendiri.
-  const V7_TILE_SVG_DATAURL = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 20" preserveAspectRatio="none"><path d="M 1,12 Q 6,4 11,13 T 22,9 T 34,12" fill="none" stroke="%231a1a1a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  let _v7TileImg = null;
-  let _v7TileLoadPromise = null;
-  function ensureV7TileImageLoaded() {
-    if (_v7TileLoadPromise) return _v7TileLoadPromise;
-    _v7TileLoadPromise = new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => { _v7TileImg = img; resolve(img); };
-      img.onerror = reject;
-      img.src = V7_TILE_SVG_DATAURL;
-    });
-    return _v7TileLoadPromise;
-  }
-
-  // Menggambar tile v7 berulang persis spt CSS:
-  //   background-size: 17px 62%;  background-repeat: repeat-x;
-  //   background-position: left {shift}px center;
-  //   transform: rotate({-0.4 + rot}deg) [transform-origin: center]
-  // TIDAK ada parameter amplitude/wavelength/warna custom -- semua nilai
-  // (17px, 62%, -0.4deg, rentang --rot/--shift) di-hardcode identik dgn v7.
+  // ================== PORT PERSIS DARI "word-level-wavy-censor-preview-v7" ==================
+  // PENTING: atas permintaan eksplisit, bentuk/matematika gelombang di sini
+  // TIDAK BOLEH diinterpretasi ulang. String SVG referensinya:
+  //
+  //   background-image: url('data:image/svg+xml;utf8,<svg ...><path
+  //     d="M 1,12 Q 6,4 11,13 T 22,9 T 34,12" stroke="%231a1a1a" .../></svg>');
+  //   background-size: 17px 62%;
+  //   background-repeat: repeat-x;
+  //   background-position: left var(--shift, 0px) center;
+  //   transform: rotate(calc(-0.4deg + var(--rot, 0deg)));
+  //
+  // dgn --rot = (Math.random()*0.8-0.4) dan --shift = Math.round(Math.random()*8).
+  //
+  // FIX BUG "kualitas pixel kurang / beberapa terlihat terpotong": versi
+  // sebelumnya me-rasterisasi SVG di atas jadi <img> (via ensureV7TileImageLoaded),
+  // lalu men-scale gambar raster itu ke ukuran tile kecil (17px x ~62% tinggi
+  // kata) pakai ctx.drawImage(). Ini PUNYA 2 masalah teknis:
+  //   1) <img> dari data-URI SVG tanpa atribut width/height eksplisit
+  //      dirasterisasi browser di resolusi intrinsik yg TIDAK PASTI/rendah,
+  //      lalu di-downscale ke ukuran tile yg sangat kecil -- proses scaling
+  //      raster inilah yg membuat garis tipis (stroke-width 2.6) terlihat
+  //      buram/pecah pixel, bukan tajam spt vector asli.
+  //   2) drawWavyScribbleLine() bergantung pada _v7TileImg yg dimuat scr
+  //      ASINKRON (Promise) -- kalau dipanggil sebelum gambar itu selesai
+  //      dimuat, fungsi diam2 `return` tanpa menggambar apa pun utk kata itu
+  //      (bisa terlihat spt "terpotong"/hilang sebagian pada rentetan Blur
+  //      yg cepat/banyak).
+  //
+  // SOLUSI (bukan mengubah bentuk, cuma cara render): path SVG yg SAMA PERSIS
+  // digambar LANGSUNG sbg vector path canvas (moveTo/quadraticCurveTo),
+  // bukan lewat perantara raster <img>. Titik kontrol utk 2 perintah "T"
+  // (smooth quadratic, singkatan SVG yg tidak ada padanan langsung di Canvas
+  // API) diturunkan scr matematis persis dari rumus refleksi SVG resmi
+  // (reflected = 2*currentPoint - previousControlPoint):
+  //   Segmen 1 (Q): kontrol (6,4)   -> titik akhir (11,13)
+  //   Segmen 2 (T 22,9): kontrol refleksi = 2*(11,13)-(6,4) = (16,22)
+  //   Segmen 3 (T 34,12): kontrol refleksi = 2*(22,9)-(16,22) = (28,-4)
+  // Hasilnya adalah kurva Bezier yg IDENTIK 100% dgn path SVG aslinya --
+  // bisa diverifikasi ulang manual dgn rumus refleksi resmi di atas.
+  // Skala non-seragam (17/34 utk X, tileH/20 utk Y) direplikasi via
+  // ctx.scale(sx,sy) SEBELUM stroke, persis meniru cara SVG viewBox
+  // men-transform koordinat & stroke-width scr anisotropik -- bukan
+  // pendekatan manual sendiri. Tidak ada lagi ketergantungan pada gambar
+  // raster/pemuatan asinkron sama sekali.
   function drawWavyScribbleLine(ctx, w, h) {
-    if (!_v7TileImg) return; // safety: seharusnya sudah di-preload sblm dipanggil
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
@@ -1708,10 +1727,24 @@
     const tileH = h * 0.62; // background-size: ... 62%
     const yPos = (h - tileH) / 2; // background-position: ... center
 
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
     let x = shiftPx % tileW;
     if (x > 0) x -= tileW;
     for (; x < w; x += tileW) {
-      ctx.drawImage(_v7TileImg, x, yPos, tileW, tileH);
+      ctx.save();
+      ctx.translate(x, yPos);
+      ctx.scale(tileW / 34, tileH / 20); // persis rasio viewBox 34x20 -> tile pixel
+      ctx.lineWidth = 2.6; // sama persis dgn stroke-width SVG asli (dlm unit viewBox, ikut ter-scale otomatis)
+      ctx.beginPath();
+      ctx.moveTo(1, 12);
+      ctx.quadraticCurveTo(6, 4, 11, 13);   // Q 6,4 11,13
+      ctx.quadraticCurveTo(16, 22, 22, 9);  // T 22,9 (kontrol hasil refleksi)
+      ctx.quadraticCurveTo(28, -4, 34, 12); // T 34,12 (kontrol hasil refleksi)
+      ctx.stroke();
+      ctx.restore();
     }
 
     ctx.restore();
@@ -1728,10 +1761,26 @@
     baseCtx.fillStyle = bgColor;
     baseCtx.fillRect(0, 0, w, h);
 
-    // Layer 1 (blur) digambar ke canvas akhir, lalu Layer 2 (garis tajam)
-    // ditimpakan di atasnya dgn filter direset ke 'none'.
+    // FIX BUG "bekas warna hitam teks asli masih tembus di pinggir kotak
+    // hasil blur": pola bug ini SAMA PERSIS dgn yg sudah pernah diperbaiki
+    // di applyGaussianBlur (lihat sampleCornerColor & komentarnya di atas)
+    // -- ctx.filter='blur()' yg digambar ke kanvas `out` yg masih KOSONG/
+    // TRANSPARAN membuat hasilnya memudar ke TRANSPARAN (bukan ke warna
+    // latar) persis di pinggir kanvas, krn area di luar batas kanvas
+    // dianggap kosong oleh browser -- celah transparan itu membiarkan
+    // konten ASLI di baliknya (teks yg semestinya sdh full tertutup)
+    // sedikit tembus. applyHandwriter() sebelumnya TIDAK memakai pola
+    // backfill yg sama, jadi bug yg sama muncul lagi di sini scr terpisah.
+    // Solusinya identik: isi `out` dgn bgColor OPAQUE dulu SEBELUM di-blur
+    // -- karena backfill & layer yg di-blur di atasnya memakai warna yg
+    // SAMA PERSIS, bagian tepi yg "pudar transparan" itu memudar ke warna
+    // yg sama juga (alpha*warnaX + (1-alpha)*warnaX = warnaX utk alpha
+    // berapa pun), sehingga scr optik hasilnya tetap solid 100% di seluruh
+    // area tanpa celah sama sekali.
     const out = document.createElement('canvas'); out.width = w; out.height = h;
     const ctx = out.getContext('2d');
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, w, h); // <- backfill opaque, kunci perbaikannya di baris ini
     ctx.filter = 'blur(3px)';
     ctx.drawImage(baseTemp, 0, 0);
     ctx.filter = 'none';
@@ -1928,9 +1977,11 @@
       const relevantPages = new Set(state.selectedAreas.map((a) => a.page + 1));
       for (const pageNum of relevantPages) await ensureWordBoxesForPage(getPageInfo(pageNum)); // eslint-disable-line no-await-in-loop
 
-      // Pastikan tile SVG persis-v7 (dipakai gaya Handwriter) sudah selesai
-      // dimuat sblm dipakai menggambar -- sekali dimuat, di-cache seterusnya.
-      await ensureV7TileImageLoaded();
+      // CATATAN: preload tile SVG scr asinkron (ensureV7TileImageLoaded) SUDAH
+      // TIDAK DIPERLUKAN LAGI -- drawWavyScribbleLine() sekarang menggambar
+      // path vector langsung (tidak lagi lewat perantara <img> raster), jadi
+      // tidak ada lagi ketergantungan pemuatan asinkron / race condition yg
+      // bisa membuat sebagian kata gagal tergambar ("terpotong").
 
       const expandedAreas = [];
       state.selectedAreas.forEach((a) => {
@@ -2372,7 +2423,6 @@
   })();
 
   // ================== INIT ==================
-  ensureV7TileImageLoaded(); // preload lbh awal spy tdk ada jeda saat Blur pertama diklik
   checkBackendHealth();
 })();
 </script>
