@@ -904,10 +904,62 @@
       const fontFamily = styleInfo.fontFamily || 'sans-serif';
       measureCtx.font = `${Math.max(1, itemHeight)}px ${fontFamily}`;
 
-      const words = item.str.split(/(\s+)/).filter((w) => w.length > 0);
+      const rawWords = item.str.split(/(\s+)/).filter((w) => w.length > 0);
+
+      // FIX BUG "kata tergabung tanpa spasi pd font kecil/celah sangat
+      // sempit" (mis. 'PKL,dari' terdeteksi jd 1 kata): dibuktikan scr
+      // empiris -- pd celah antar-kata yg sangat sempit relatif thd ukuran
+      // font (diuji sampai ~25% lebar spasi normal), pdf.js getTextContent()
+      // GAGAL menyisipkan karakter spasi sama sekali, walau scr visual ada
+      // jarak nyata di halaman. Krn tidak ada sinyal spasi tersisa yg bisa
+      // diandalkan dari string-nya, dipakai heuristik AMAN: pisahkan
+      // tambahan tepat SETELAH tanda baca penutup umum yg LANGSUNG diikuti
+      // huruf/angka tanpa spasi -- pola ini praktis TIDAK PERNAH muncul pd
+      // prosa yg benar.
+      //
+      // PENTING: tanda TITIK (.) SENGAJA TIDAK dimasukkan ke daftar ini --
+      // beda dari koma/titik-koma/dll, titik SERING muncul sah di tengah
+      // satu token tanpa spasi (alamat email "bambang.wijaya@...", domain
+      // "contohmail.com", angka desimal "3.14", singkatan). Terbukti scr
+      // regresi: versi awal heuristik ini (dgn titik disertakan) SALAH
+      // memecah "bambang.wijaya@contohmail.com" jadi 2 token terpisah.
+      // Tanda baca lain (, ; : ! ? ) ]) jauh lebih aman krn nyaris tidak
+      // pernah muncul di tengah token sah tanpa spasi setelahnya.
+      const PUNCT_BOUNDARY = /(?<=[,;:!?)\]])(?=[A-Za-zÀ-ÖØ-öø-ÿ0-9])/;
+      const words = [];
+      rawWords.forEach((w) => {
+        if (/^\s+$/.test(w)) { words.push(w); return; }
+        w.split(PUNCT_BOUNDARY).forEach((part) => { if (part) words.push(part); });
+      });
       const measuredWidths = words.map((w) => measureCtx.measureText(w).width);
       const measuredTotal = measuredWidths.reduce((a, b) => a + b, 0) || 1;
       const scaleFactor = itemWidth / measuredTotal;
+
+      // FIX BUG "1 kata kepilih malah kena kata tetangganya jg, khusus pd
+      // font kecil": WORD_BOX_PADDING_X dulu nilai TETAP 3px pd kedua sisi
+      // tiap kotak kata, terlepas seberapa besar/kecil fontnya. Utk font
+      // besar itu aman (3px cuma sebagian kecil dr lebar kata), TAPI utk
+      // font kecil, lebar spasi ASLI antar kata bisa cuma ~2-3px -- padding
+      // 3px+3px=6px dr 2 kata bersebelahan jadi LEBIH BESAR drpd spasi
+      // aslinya sendiri, membuat kedua kotak kata SALING TUMPANG TINDIH
+      // (scr visual & scr klik/seleksi). Dibuktikan scr matematis: pd font
+      // Helvetica 7pt (skala 1.5x), lebar 1 spasi cuma ~2.92px.
+      //
+      // Solusi: padding dihitung DINAMIS per baris teks (per PDF text-item),
+      // berdasarkan lebar spasi TERSEMPIT yg benar2 terukur pd baris itu --
+      // dibatasi maksimum 35% dr lebar spasi asli (jd kedua sisi kata
+      // bertetangga totalnya maks ~70%, selalu menyisakan celah asli yg
+      // nyata), dan tetap di-cap max 3px spy perilaku pd font normal/besar
+      // tidak berubah drastis dr sebelumnya.
+      let minSpaceWidthPx = Infinity;
+      words.forEach((chunk, i) => {
+        if (/^\s+$/.test(chunk)) {
+          const spaceWidthPx = measuredWidths[i] * scaleFactor;
+          if (spaceWidthPx < minSpaceWidthPx) minSpaceWidthPx = spaceWidthPx;
+        }
+      });
+      if (!isFinite(minSpaceWidthPx)) minSpaceWidthPx = itemHeight * 0.3; // fallback: item cuma 1 kata (tanpa spasi sama sekali)
+      const dynamicPaddingX = Math.max(0.5, Math.min(WORD_BOX_PADDING_X, minSpaceWidthPx * 0.35));
 
       let cursorX = itemX;
       words.forEach((chunk, i) => {
@@ -916,10 +968,11 @@
           boxes.push({
             index: globalIndex++,
             text: chunk,
-            x: cursorX - WORD_BOX_PADDING_X,
+            x: cursorX - dynamicPaddingX,
             y: itemY,
-            width: chunkWidth + WORD_BOX_PADDING_X * 2,
+            width: chunkWidth + dynamicPaddingX * 2,
             height: boxHeight,
+            paddingX: dynamicPaddingX, // disimpan per-box spy applyMinGapSpacing tau batas aman box ini scr spesifik
           });
         }
         cursorX += chunkWidth;
@@ -1065,6 +1118,7 @@
   // frasa spt "Jalan Melati No. 27" ikut tertandai utuh.
   const SENSITIVE_PATTERNS = {
     nik: /\b\d{16}\b/g,
+    nim: /\b\d{15}\b/g,
     phone: /(\+62|62|0)8[1-9][0-9]{7,11}\b/g,
     email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
     currency: /(Rp\.?|IDR)\s*[\d.,]+/gi,
@@ -1073,11 +1127,24 @@
     dob: /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g,
     npwp: /\b\d{2}\.\d{3}\.\d{3}\.\d{1}-\d{3}\.\d{3}\b/g,
     plate: /\b[A-Z]{1,2}\s\d{1,4}\s[A-Z]{1,3}\b/g,
+    // FITUR BARU: deteksi Nama, berbasis LABEL FIELD ("Nama :", "Atas Nama",
+    // dst) -- BUKAN heuristik "kapital berurutan" (Capital Case) murni.
+    // Alasan: dokumen form resmi (spt Form 1B Universitas Brawijaya yg
+    // dites) penuh teks institusional berpola sama (Title Case) yg BUKAN
+    // nama orang -- "UNIVERSITAS BRAWIJAYA", "FAKULTAS ILMU KOMPUTER",
+    // "Tata Kelola Teknologi Informasi", "Dosen Pembimbing", dst. Heuristik
+    // kapital murni akan menghasilkan banyak false-positive pd dokumen jenis
+    // ini. Pendekatan berbasis label field jauh lebih presisi utk kasus
+    // form/surat resmi yg formatnya "Label : Isi".
+    // Named capture group (nameValue) dipakai supaya HANYA bagian nilai
+    // nama-nya yg disensor, bukan label "Nama :"-nya -- lihat penanganan
+    // m.indices.groups di loop scanning di bawah (butuh flag /d).
+    name: /\b(?:Nama(?:\s+(?:Lengkap|Mahasiswa|Dosen|Pembimbing|Terang|Wali))?|Atas\s+Nama|a\.?n\.?)\s*:\s*(?<nameValue>.+)$/gid,
   };
   const SENSITIVE_LABELS = {
-    nik: 'NIK', phone: 'No. Telepon', email: 'Email', currency: 'Nominal Uang',
+    nik: 'NIK', nim: 'NIM', phone: 'No. Telepon', email: 'Email', currency: 'Nominal Uang',
     address: 'Alamat', addressKeyword: 'Alamat', dob: 'Tanggal Lahir',
-    npwp: 'NPWP', plate: 'Plat Nomor',
+    npwp: 'NPWP', plate: 'Plat Nomor', name: 'Nama',
   };
 
   // Kelompokkan wordBoxes 1 halaman jadi baris (posisi y berdekatan), susun
@@ -1126,8 +1193,16 @@
             pattern.lastIndex = 0;
             let m;
             while ((m = pattern.exec(line.text)) !== null) {
-              const matchStart = m.index;
-              const matchEnd = matchStart + m[0].length;
+              let matchStart = m.index;
+              let matchEnd = matchStart + m[0].length;
+
+              // Utk pola dgn named capture group (mis. 'name': field label
+              // "Nama :" TIDAK ikut disensor, HANYA nilainya) -- pakai posisi
+              // capture group tsb (dari flag /d, m.indices) alih2 posisi
+              // keseluruhan match yg juga mencakup label & tanda titik dua.
+              if (m.indices && m.indices.groups && m.indices.groups.nameValue) {
+                [matchStart, matchEnd] = m.indices.groups.nameValue;
+              }
 
               line.offsets.forEach((o) => {
                 const overlaps = !(o.end <= matchStart || o.start >= matchEnd);
@@ -1145,7 +1220,7 @@
         });
       });
 
-      if (totalAdded === 0) return showToast('Tidak ditemukan data sensitif (NIK/telepon/email/nominal/alamat/tanggal lahir/NPWP/plat) pada dokumen ini.', 'info');
+      if (totalAdded === 0) return showToast('Tidak ditemukan data sensitif (NIK/NIM/telepon/email/nominal/alamat/tanggal lahir/NPWP/plat/nama) pada dokumen ini.', 'info');
 
       renderAllOverlays();
       const uniqueLabels = [...new Set(Object.keys(byCategory).map((k) => SENSITIVE_LABELS[k] || k))];
@@ -1924,7 +1999,13 @@
   // computeWordBoxesForPage), jadi shrink maksimum per sisi dibatasi sampai
   // padding itu habis -- tidak lebih, supaya cakupan sensor thd teks asli
   // tidak pernah berkurang.
-  function applyMinGapSpacing(rects, minGap = MIN_WORD_GAP_PX) {
+  // FIX: gap 3px tetap (flat) terasa nyaris tak kelihatan scr visual pd
+  // pola gelombang rapat (wavelength tile ~17px) -- dibuktikan lewat laporan
+  // "antar kata masih terlihat bersambung". Target gap sekarang dibuat
+  // PROPORSIONAL thd tinggi kata (bukan angka tetap), supaya konsisten
+  // terlihat sbg "spasi asli" pd berbagai ukuran font -- font besar dapat
+  // gap absolut lebih lebar, font kecil tetap dapat gap yg proporsional.
+  function applyMinGapSpacing(rects, minGapOverride) {
     const lineTolerance = 6;
     const lines = [];
     rects.forEach((r) => {
@@ -1940,13 +2021,31 @@
         const next = line.items[i + 1];
         const curRight = cur.x + cur.width;
         const gap = next.x - curRight;
+
+        // Target gap: proporsional thd tinggi kata terkecil dari sepasang
+        // box yg bertetangga (konservatif), dibatasi bawah oleh
+        // MIN_WORD_GAP_PX spy tetap ada efek minimal walau font sangat kecil.
+        const refHeight = Math.min(cur.height || 0, next.height || 0) || 0;
+        const minGap = minGapOverride ?? Math.max(MIN_WORD_GAP_PX, refHeight * 0.3);
+
         if (gap >= minGap) continue; // sudah cukup renggang scr alami, jangan diutak-atik
 
         const deficit = minGap - Math.max(0, gap);
         const shrinkEach = deficit / 2;
 
-        const curMinRight = curRight - WORD_BOX_PADDING_X; // batas aman: sisa padding kanan cur
-        const nextMaxLeft = next.x + WORD_BOX_PADDING_X;    // batas aman: sisa padding kiri next
+        // FIX: batas aman shrink dulu memakai konstanta TETAP
+        // (WORD_BOX_PADDING_X), padahal box kata sekarang bisa punya padding
+        // DINAMIS lebih kecil di font kecil (lihat dynamicPaddingX di
+        // computeWordBoxesForPage). Kalau batas aman di sini tetap pakai
+        // angka tetap yg lebih besar dari padding asli box tsb, shrink bisa
+        // "kebablasan" masuk ke area glyph asli. Sekarang dipakai padding
+        // ASLI tiap box (cur.paddingX/next.paddingX), fallback ke konstanta
+        // tetap kalau box tsb tidak py info itu (mis. hasil fallback area
+        // snip mentah tanpa deteksi kata).
+        const curPad = cur.paddingX ?? WORD_BOX_PADDING_X;
+        const nextPad = next.paddingX ?? WORD_BOX_PADDING_X;
+        const curMinRight = curRight - curPad; // batas aman: sisa padding kanan cur
+        const nextMaxLeft = next.x + nextPad;   // batas aman: sisa padding kiri next
 
         const newCurRight = Math.max(curRight - shrinkEach, curMinRight);
         const newNextLeft = Math.min(next.x + shrinkEach, nextMaxLeft);
