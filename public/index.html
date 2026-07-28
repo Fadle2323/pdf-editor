@@ -550,6 +550,21 @@
   };
 
   // ================== UI HELPERS ==================
+  // FIX BUG KEAMANAN (XSS): renderHistoryLog() dulu menyisipkan
+  // entry.actionName LANGSUNG ke innerHTML tanpa di-escape. actionName bisa
+  // berasal dari file.name (nama file yg diupload user -- lihat
+  // `Dokumen diupload: ${file.name}` di handleFile), yg SEPENUHNYA
+  // dikontrol user/penyerang. Terbukti scr empiris: mengupload file bernama
+  // '<img src=x onerror="...">.pdf' membuat JS di dalam atribut onerror itu
+  // benar2 TEREKSEKUSI di riwayat aktivitas -- XSS nyata, bukan teoretis.
+  // Fungsi ini meng-escape 5 karakter HTML-sensitif sebelum teks
+  // apa pun (actionName, timestamp, atau string lain yg berasal/bisa
+  // dipengaruhi input user) disisipkan ke dalam innerHTML manapun.
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
   function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const el = document.createElement('div');
@@ -594,14 +609,34 @@
   async function apiFetch(path, options = {}) {
     let res;
     try { res = await fetch(`${API_BASE}${path}`, options); }
-    catch (err) { showToast('Tidak bisa terhubung ke backend.', 'error'); throw err; }
+    catch (err) { showToast('Tidak bisa terhubung ke backend.', 'error'); err.toastShown = true; throw err; }
     let body;
-    try { body = await res.json(); } catch (err) { showToast('Respons dari server tidak valid.', 'error'); throw err; }
+    try { body = await res.json(); } catch (err) { showToast('Respons dari server tidak valid.', 'error'); err.toastShown = true; throw err; }
     if (!res.ok || body.status === 'error') {
       showToast(body.message || `Terjadi kesalahan (HTTP ${res.status})`, 'error');
-      throw new Error(body.message || `HTTP ${res.status}`);
+      const err = new Error(body.message || `HTTP ${res.status}`);
+      err.toastShown = true;
+      throw err;
     }
     return body.data;
+  }
+
+  // FIX BUG "operasi gagal tanpa pesan apa pun ke user": banyak handler
+  // (Blur, Delete, Export, Convert, Merge, Split, Compress) punya blok
+  // catch yg HANYA console.error(err) tanpa showToast -- utk error yg lolos
+  // dari apiFetch() (mis. network/HTTP error), toast SUDAH muncul dari
+  // dalam apiFetch (ditandai err.toastShown = true di atas) jadi outer
+  // catch aman diam. TAPI kalau error murni terjadi di sisi client
+  // (exception saat proses canvas/crop/dll, SEBELUM sempat memanggil
+  // apiFetch), toastShown tidak pernah ke-set -- versi lama diam total,
+  // user cuma lihat loading spinner hilang tanpa penjelasan. Dibuktikan
+  // scr empiris dgn memaksa exception murni di canvas API: benar2 tidak
+  // ada feedback apa pun ke user. Fungsi ini jadi satu titik pemanggilan
+  // dari semua outer-catch supaya konsisten & tidak dobel toast.
+  function reportUnexpectedError(err, fallbackMessage) {
+    console.error(err);
+    if (err && err.toastShown) return; // sudah ditampilkan oleh apiFetch, jangan dobel
+    showToast(fallbackMessage || `Terjadi kesalahan tak terduga: ${err && err.message ? err.message : err}`, 'error');
   }
 
   async function checkBackendHealth() {
@@ -732,16 +767,20 @@
           : 'bg-white border-outline-variant hover:border-primary hover:bg-surface-container-high');
 
       const icon = getActionIcon(entry.actionName);
+      // FIX KEAMANAN: actionName & timestamp di-escape sblm masuk innerHTML
+      // -- lihat penjelasan lengkap di fungsi escapeHtml().
+      const safeActionName = escapeHtml(entry.actionName);
+      const safeTimestamp = escapeHtml(entry.timestamp);
       item.innerHTML = `
         <div class="flex justify-between items-start gap-2">
           <div class="flex items-start gap-3 min-w-0">
             <span class="material-symbols-outlined text-[20px] mt-0.5 flex-shrink-0 ${isActive ? 'text-on-primary-container' : 'text-on-surface-variant'}">${icon}</span>
             <div class="flex flex-col min-w-0">
-              <span class="font-body-md text-[13px] font-medium leading-tight truncate ${isActive ? 'text-on-primary-container' : 'text-on-surface'}">${entry.actionName}</span>
+              <span class="font-body-md text-[13px] font-medium leading-tight truncate ${isActive ? 'text-on-primary-container' : 'text-on-surface'}">${safeActionName}</span>
               ${isActive ? '<span class="text-[9px] font-bold tracking-wider uppercase opacity-70 mt-1">Current State</span>' : ''}
             </div>
           </div>
-          <span class="text-[10px] font-mono opacity-60 flex-shrink-0 mt-0.5">${entry.timestamp}</span>
+          <span class="text-[10px] font-mono opacity-60 flex-shrink-0 mt-0.5">${safeTimestamp}</span>
         </div>`;
       item.addEventListener('click', () => goToHistory(i));
       list.appendChild(item);
@@ -1723,21 +1762,6 @@
   // Catatan: fungsi ini butuh `pageInfo` & `area` (posisi asli di kanvas)
   // utk bisa sampling warna sekitarnya -- dikirim dari processBlurStyle().
   // ================== PORT PERSIS DARI "word-level-wavy-censor-preview-v7" ==================
-  // PENTING: atas permintaan eksplisit, bagian ini TIDAK BOLEH diinterpretasi
-  // ulang / dimodifikasi dgn matematika sendiri (itu penyebab versi2
-  // sebelumnya tidak pernah 100% sama spt referensi). String SVG di bawah
-  // adalah COPY PERSIS dari CSS asli preview v7:
-  //
-  //   background-image: url('data:image/svg+xml;utf8,<svg ...><path
-  //     d="M 1,12 Q 6,4 11,13 T 22,9 T 34,12" stroke="%231a1a1a" .../></svg>');
-  //   background-size: 17px 62%;
-  //   background-repeat: repeat-x;
-  //   background-position: left var(--shift, 0px) center;
-  //   transform: rotate(calc(-0.4deg + var(--rot, 0deg)));
-  //
-  // dgn --rot = (Math.random()*0.8-0.4) dan --shift = Math.round(Math.random()*8)
-  // persis spt applyWordLevelHandwrittenBlur() di v7. Krn tujuan akhirnya
-  // ================== PORT PERSIS DARI "word-level-wavy-censor-preview-v7" ==================
   // PENTING: atas permintaan eksplisit, bentuk/matematika gelombang di sini
   // TIDAK BOLEH diinterpretasi ulang. String SVG referensinya:
   //
@@ -1954,7 +1978,7 @@
       pushHistory(data.filename, `Hapus ${areas.length} area terpilih`);
       await loadPdfFromServer(data.filename);
       showToast(`${areas.length} area terpilih berhasil dihapus (warna latar menyesuaikan sekitarnya).`, 'success');
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal menghapus area terpilih. Coba lagi.'); } finally { setLoading(false); }
   });
 
   // FIX BUG "sensor menyatukan beberapa kata jadi 1 blok memanjang": kalau
@@ -2105,7 +2129,7 @@
       pushHistory(data.filename, `Blur diterapkan: ${document.getElementById('blur-style').selectedOptions[0].textContent} (${patches.length} area)`);
       await loadPdfFromServer(data.filename);
       showToast(`${patches.length} area berhasil di-blur (dipecah per-kata jika perlu).`, 'success');
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal menerapkan Blur. Coba lagi.'); } finally { setLoading(false); }
   });
 
   document.getElementById('btn-clear-selection').addEventListener('click', clearSelection);
@@ -2311,7 +2335,7 @@
         URL.revokeObjectURL(url);
         showToast('Semua teks & tanda tangan berhasil disimpan permanen & diunduh.', 'success');
       }
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal export PDF. Perubahan Anda BELUM tersimpan -- coba lagi.'); } finally { setLoading(false); }
   });
 
   // ================== CONVERT ==================
@@ -2325,7 +2349,7 @@
       const data = await apiFetch(endpointMap[format], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename() }) });
       showToast('Konversi berhasil.', 'success');
       await downloadFile(data.filename, `hasil-convert.${extMap[format]}`);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal mengonversi dokumen. Coba lagi.'); } finally { setLoading(false); }
   });
 
   // ================== MERGE ==================
@@ -2344,7 +2368,7 @@
       const mergeData = await apiFetch('/merge-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: uploadedNames, originalNames }) });
       showToast('PDF berhasil digabungkan.', 'success');
       await downloadFile(mergeData.filename, 'hasil-merge.pdf');
-    } catch (err) { console.error(err); } finally { setLoading(false); e.target.value = ''; }
+    } catch (err) { reportUnexpectedError(err, 'Gagal menggabungkan PDF. Coba lagi.'); } finally { setLoading(false); e.target.value = ''; }
   });
 
   // ================== SPLIT (modal preview thumbnail interaktif) ==================
@@ -2417,7 +2441,7 @@
       const data = await apiFetch('/split-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), ranges }) });
       showToast(`${data.files.length} file hasil split siap diunduh.`, 'success');
       for (const f of data.files) await downloadFile(f.filename, `hasil-split-${f.range}.pdf`); // eslint-disable-line no-await-in-loop
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal memisahkan halaman PDF. Coba lagi.'); } finally { setLoading(false); }
   });
 
   // ================== COMPRESS ==================
@@ -2429,7 +2453,7 @@
       const info = data.imagesProcessed > 0 ? ` (${data.imagesProcessed} gambar dikompres ulang)` : ' (PDF ini tampaknya berbasis teks, kompresi gambar tidak berlaku)';
       showToast(`Ukuran berkurang ${data.reductionPercent}%${info}.`, 'success');
       await downloadFile(data.filename, 'hasil-compress.pdf');
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { reportUnexpectedError(err, 'Gagal mengompres PDF. Coba lagi.'); } finally { setLoading(false); }
   });
 
   // ================== RESIZABLE SIDEBAR ==================

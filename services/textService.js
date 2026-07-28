@@ -11,7 +11,27 @@ async function extractTextFromFile(filePath) {
 
   if (ext === '.pdf') {
     const buffer = fs.readFileSync(filePath);
-    const parsed = await pdfParse(buffer);
+    let parsed;
+    try {
+      parsed = await pdfParse(buffer);
+    } catch (err) {
+      // FIX: pdf-parse (dipakai KHUSUS utk fitur Convert/extract-text) lebih
+      // ketat drpd pdf.js (dipakai di viewer/editor client-side) soal struktur
+      // PDF -- ada PDF yg valid & tampil/edit sempurna di editor, tapi GAGAL
+      // di sini dgn pesan teknis mentah spt "bad XRef entry" yg tidak
+      // dipahami user awam. Dibuktikan scr empiris: beberapa PDF yg
+      // berhasil dibuka & diedit penuh di aplikasi ini tetap gagal
+      // dikonversi krn alasan teknis ini. Pesan asli tetap di-log utk
+      // developer, tapi user diberi pesan yg actionable.
+      console.error('[extractTextFromFile] pdf-parse gagal:', err.message);
+      const friendly = new Error(
+        'Gagal membaca isi teks PDF ini (kemungkinan struktur file tidak standar). '
+        + 'Dokumen tetap bisa dibuka & diedit normal di editor, tapi belum bisa dikonversi ke Word/Excel/Text. '
+        + 'Coba export ulang PDF-nya dari aplikasi sumber, atau gunakan fitur Export PDF biasa sbg gantinya.'
+      );
+      friendly.statusCode = 422;
+      throw friendly;
+    }
     const text = parsed.text || '';
     const wordCount = countWords(text);
     return {
