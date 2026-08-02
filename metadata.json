@@ -1,0 +1,7 @@
+{
+  "name": "Scripta PDF Workspace",
+  "description": "A web-based PDF workspace for viewing, editing, splitting, converting, and digitally signing PDF documents, powered by a robust Express backend.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
