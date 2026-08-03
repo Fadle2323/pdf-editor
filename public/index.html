@@ -866,34 +866,30 @@
       const finalName = suggestedName || filename;
       const downloadUrl = `${API_BASE}/download/${encodeURIComponent(filename)}?name=${encodeURIComponent(finalName)}`;
 
-      // Cek ketersediaan File System Access API (hanya jika top-level window, bukan sandboxed iframe)
+      // showSaveFilePicker: stream langsung ke file handle tanpa buffer seluruh file ke RAM.
+      // Ini aman untuk file besar (40MB+) karena pakai pipeTo() bukan blob.arrayBuffer().
       if (window.showSaveFilePicker && window.self === window.top) {
         try {
-          const res = await fetch(downloadUrl);
-          if (!res.ok) {
-            let msg = `HTTP ${res.status}`;
-            try { const b = await res.json(); if (b.message) msg = b.message; } catch (_) {}
-            throw new Error(msg);
-          }
-          const blob = await res.blob();
-          const ext = finalName.includes('.') ? finalName.split('.').pop() : 'pdf';
-          const mime = blob.type || 'application/octet-stream';
+          const ext  = finalName.includes('.') ? finalName.split('.').pop() : 'pdf';
+          const mime = ext === 'txt' ? 'text/plain' : 'application/pdf';
           const handle = await window.showSaveFilePicker({
             suggestedName: finalName,
             types: [{ description: 'File PDF/TXT', accept: { [mime]: ['.' + ext] } }],
           });
           const writable = await handle.createWritable();
-          await writable.write(blob);
-          await writable.close();
+          // Fetch dan stream langsung ke file — tidak ada blob di RAM
+          const res = await fetch(downloadUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await res.body.pipeTo(writable);
           showToast('File berhasil disimpan di lokasi pilihan Anda.', 'success');
           return;
         } catch (pickErr) {
           if (pickErr.name === 'AbortError') { showToast('Penyimpanan dibatalkan.', 'info'); return; }
-          console.warn('showSaveFilePicker tidak digunakan, fallback ke unduhan langsung:', pickErr.message);
+          console.warn('showSaveFilePicker gagal, fallback ke unduhan langsung:', pickErr.message);
         }
       }
 
-      // Direct streaming download via browser native download manager (tanpa beban memori JS)
+      // Fallback: unduhan native browser (streaming dari server, tanpa beban memori JS)
       const a = document.createElement('a');
       a.href = downloadUrl;
       a.download = finalName;
@@ -1075,17 +1071,16 @@
   async function loadPdfFromServer(filename) {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/download/${encodeURIComponent(filename)}`);
-      if (!res.ok) {
-        let msg = `Gagal mengambil file dari server (HTTP ${res.status})`;
-        try { const b = await res.json(); if (b.message) msg = b.message; } catch (_) {}
-        throw new Error(msg);
-      }
-      const arrayBuffer = await res.arrayBuffer();
-      state.pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      // Gunakan URL langsung ke pdf.js agar bisa pakai HTTP range requests (lebih hemat memori
+      // untuk file besar). JANGAN fetch sebagai arrayBuffer karena untuk PDF 40MB+ akan
+      // memuat seluruh file ke RAM browser dan bisa timeout/gagal.
+      const url = `${API_BASE}/download/${encodeURIComponent(filename)}`;
+      state.pdfDoc = await pdfjsLib.getDocument({ url, withCredentials: false }).promise;
       await renderAllPages();
-    } catch (err) { console.error(err); showToast('Gagal me-render PDF: ' + err.message, 'error'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal me-render PDF: ' + err.message, 'error');
+    } finally { setLoading(false); }
   }
 
   let pageObserver = null;
@@ -2778,7 +2773,7 @@
 
   // ================== UPLOAD ==================
   async function uploadFileInChunks(file, onProgress) {
-    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB per chunk agar selalu aman di bawah batas payload reverse proxy / Nginx
+    const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB per chunk — aman untuk hampir semua konfigurasi proxy/nginx
     if (file.size <= CHUNK_SIZE) {
       const formData = new FormData(); formData.append('file', file);
       if (onProgress) onProgress(1, 1, 100);
