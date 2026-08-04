@@ -863,40 +863,23 @@
   // ================== DOWNLOAD (Stream langsung hemat memori untuk file besar) ==================
   async function downloadFile(filename, suggestedName) {
     try {
-      const finalName = suggestedName || filename;
-      const downloadUrl = `${API_BASE}/download/${encodeURIComponent(filename)}?name=${encodeURIComponent(finalName)}`;
+      const finalName  = suggestedName || filename;
+      const downloadUrl = `${API_BASE}/download/${encodeURIComponent(filename)}`;
 
-      // showSaveFilePicker: stream langsung ke file handle tanpa buffer seluruh file ke RAM.
-      // Ini aman untuk file besar (40MB+) karena pakai pipeTo() bukan blob.arrayBuffer().
-      if (window.showSaveFilePicker && window.self === window.top) {
-        try {
-          const ext  = finalName.includes('.') ? finalName.split('.').pop() : 'pdf';
-          const mime = ext === 'txt' ? 'text/plain' : 'application/pdf';
-          const handle = await window.showSaveFilePicker({
-            suggestedName: finalName,
-            types: [{ description: 'File PDF/TXT', accept: { [mime]: ['.' + ext] } }],
-          });
-          const writable = await handle.createWritable();
-          // Fetch dan stream langsung ke file — tidak ada blob di RAM
-          const res = await fetch(downloadUrl);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          await res.body.pipeTo(writable);
-          showToast('File berhasil disimpan di lokasi pilihan Anda.', 'success');
-          return;
-        } catch (pickErr) {
-          if (pickErr.name === 'AbortError') { showToast('Penyimpanan dibatalkan.', 'info'); return; }
-          console.warn('showSaveFilePicker gagal, fallback ke unduhan langsung:', pickErr.message);
-        }
-      }
-
-      // Fallback: unduhan native browser (streaming dari server, tanpa beban memori JS)
+      // Selalu gunakan native browser download (<a download>) yang di-handle oleh
+      // download manager browser. Ini paling andal untuk file besar (40MB+) karena:
+      // - Tidak ada batasan memori JS (tidak perlu buffer seluruh file ke RAM)
+      // - Browser men-stream langsung ke disk
+      // - showSaveFilePicker + pipeTo() bisa terpotong di tengah jalan pada koneksi
+      //   lambat / file besar → hasil file 10KB bukan 40MB
       const a = document.createElement('a');
-      a.href = downloadUrl;
+      a.href     = downloadUrl;
       a.download = finalName;
+      a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      showToast('File sedang diunduh...', 'info');
+      // Jangan hapus <a> langsung — browser butuh sedikit waktu memproses klik
+      setTimeout(() => { try { a.remove(); } catch (_) {} }, 3000);
     } catch (err) {
       console.error(err);
       showToast('Gagal mengunduh file: ' + err.message, 'error');

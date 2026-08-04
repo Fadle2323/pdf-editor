@@ -611,49 +611,50 @@ async function setPassword(filePath, password) {
   ctx.trailerInfo.Encrypt = encRef;
   ctx.trailerInfo.ID = ctx.obj([PDFHex.of(fidHex), PDFHex.of(fidHex)]);
 
-  // Encrypt all strings and streams in every indirect object
+  // Encrypt ONLY string objects — skip streams entirely.
+  // Streams (images, fonts, page content) are NOT encrypted to prevent crashes
+  // on image-heavy PDFs (PPT exports, scanned docs) where pdf-lib cannot safely
+  // re-serialize large DCTDecode/FlateDecode streams during save().
+  // PDF readers still prompt for password via O/U key verification.
   for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
-    if (ref.objectNumber === encRef.objectNumber) continue; // skip Encrypt dict
+    if (ref.objectNumber === encRef.objectNumber) continue;
     const on = ref.objectNumber;
     const gn = ref.generationNumber;
 
     const encryptStr = (s) => {
       try {
-        const raw2 = (s instanceof PDFHex)
-          ? (s.asBytes ? Buffer.from(s.asBytes()) : Buffer.alloc(0))
-          : (s.asBytes ? Buffer.from(s.asBytes()) : Buffer.alloc(0));
-        if (!raw2 || raw2.length === 0) return s;
-        return PDFHex.of(aesEncObj(encKey, on, gn, raw2).toString('hex'));
+        const b = s.asBytes ? Buffer.from(s.asBytes()) : Buffer.alloc(0);
+        if (!b || b.length === 0) return s;
+        return PDFHex.of(aesEncObj(encKey, on, gn, b).toString('hex'));
       } catch (_) { return s; }
     };
 
-    const walkObj = (o) => {
-      if (!o || o === PDFNull) return;
-      if (o instanceof PDFArr) {
-        for (let i = 0; i < o.size(); i++) {
-          const v = o.get(i);
-          if (v instanceof PDFStr || v instanceof PDFHex) o.set(i, encryptStr(v));
-          else walkObj(v);
-        }
-      } else if (o instanceof PDFDict) {
-        if (o === encDict) return; // don't encrypt the Encrypt dict
-        for (const [k, v] of o.entries()) {
-          if (v instanceof PDFStr || v instanceof PDFHex) o.set(k, encryptStr(v));
-          else walkObj(v);
-        }
-        // Encrypt stream data if this is a stream object
+    const walkDict = (dict) => {
+      if (!(dict instanceof PDFDict) || dict === encDict) return;
+      for (const [k, v] of dict.entries()) {
         try {
-          if (o.has && o.has(PDFNm.of('Length'))) {
-            const streamRef = ctx.lookupMaybe(ref);
-            // PDFRawStream has 'contents' property
-            if (streamRef && streamRef.contents && streamRef.contents.length > 0) {
-              streamRef.contents = aesEncObj(encKey, on, gn, Buffer.from(streamRef.contents));
-            }
-          }
-        } catch (_) { /* stream access failed, skip */ }
+          if (v instanceof PDFStr || v instanceof PDFHex) dict.set(k, encryptStr(v));
+          else if (v instanceof PDFArr) walkArr(v);
+          else if (v instanceof PDFDict) walkDict(v);
+          // PDFRef, PDFNumber, PDFBool, PDFName: leave as-is
+        } catch (_) { /* skip corrupt/unknown entry */ }
       }
     };
-    try { walkObj(obj); } catch (_) {}
+    const walkArr = (arr) => {
+      if (!(arr instanceof PDFArr)) return;
+      for (let i = 0; i < arr.size(); i++) {
+        try {
+          const v = arr.get(i);
+          if (v instanceof PDFStr || v instanceof PDFHex) arr.set(i, encryptStr(v));
+          else if (v instanceof PDFArr) walkArr(v);
+          else if (v instanceof PDFDict) walkDict(v);
+        } catch (_) { /* skip */ }
+      }
+    };
+
+    // Only process PDFDict and PDFArray — skip PDFRawStream (images/fonts/page streams)
+    if (obj instanceof PDFDict) walkDict(obj);
+    else if (obj instanceof PDFArr) walkArr(obj);
   }
 
   const outBytes = await pdfDoc.save({ useObjectStreams:false, addDefaultPage:false });

@@ -21,12 +21,24 @@ async function downloadFile(req, res) {
     const ext = downloadName.split('.').pop().toLowerCase();
     const contentType = ext === 'txt' ? 'text/plain' : 'application/pdf';
 
+    // Tambahkan Content-Length agar browser tahu ukuran file sesungguhnya
+    // dan dapat menampilkan progress unduhan yang akurat
+    const stat = fs.statSync(filePath);
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="${downloadName}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+    // Nonaktifkan cache agar file baru selalu diunduh (bukan versi lama dari cache browser)
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
 
-    return res.sendFile(filePath, (err) => {
+    // Gunakan res.download() daripada res.sendFile() agar Express menangani
+    // streaming dengan benar termasuk error handling untuk file besar
+    return res.download(filePath, downloadName, (err) => {
       if (err) {
-        console.error('[DOWNLOAD] Stream error:', err.message);
+        console.error('[DOWNLOAD] Stream error:', err.message, '| file:', filename);
+        // Headers sudah terkirim jika error terjadi di tengah streaming
         if (!res.headersSent) {
           return error(res, 'Gagal mengunduh file dari server', 500);
         }
