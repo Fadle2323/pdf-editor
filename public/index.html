@@ -898,8 +898,33 @@
         }
       } catch (_) { /* HEAD gagal → tetap coba jalur download langsung di bawah */ }
 
-      if (totalSize === null || totalSize <= DOWNLOAD_DIRECT_THRESHOLD) {
+      if (totalSize === null) {
+        // HEAD gagal total (bukan cuma soal ukuran) -- tetap coba unduh langsung
+        // sebagai upaya terakhir, browser yang urus.
         triggerAnchorDownload(downloadUrl, finalName);
+        return;
+      }
+
+      if (totalSize <= DOWNLOAD_DIRECT_THRESHOLD) {
+        // File kecil: tetap ambil lewat fetch (bukan <a href> polos) supaya kita
+        // bisa VERIFIKASI response benar-benar lengkap sebelum disimpan. Kalau
+        // response terpotong di tengah jalan (mis. request di-timeout atau
+        // container di-restart oleh platform hosting saat backend masih
+        // memproses), <a href> akan tetap "berhasil" menyimpan file yang rusak
+        // tanpa ada tanda apapun ke user -- persis gejala yang berulang kali
+        // dilaporkan (file jadi kecil & tidak bisa dibuka). Dengan fetch, kita
+        // tahu pasti dan bisa kasih pesan error yang jelas alih-alih diam-diam
+        // menyimpan file corrupt.
+        const res = await fetch(downloadUrl);
+        if (!res.ok) throw new Error(`Gagal mengunduh file (HTTP ${res.status})`);
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength !== totalSize) {
+          throw new Error(`File yang diterima (${buf.byteLength} bytes) tidak lengkap -- seharusnya ${totalSize} bytes. Kemungkinan koneksi terputus atau server gagal memproses di tengah jalan. Coba export ulang.`);
+        }
+        const blob = new Blob([buf], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        triggerAnchorDownload(blobUrl, finalName);
+        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch (_) {} }, 15000);
         return;
       }
 
