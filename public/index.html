@@ -860,26 +860,77 @@
     }
   }
 
-  // ================== DOWNLOAD (Stream langsung hemat memori untuk file besar) ==================
+  // ================== DOWNLOAD ==================
+  // File kecil: download langsung lewat <a> (paling cepat, paling hemat memori).
+  // File besar: ambil per-bagian lewat HTTP Range request lalu digabung jadi
+  // satu Blob di browser sebelum disimpan. Ini WAJIB untuk beberapa platform
+  // hosting (mis. Google Cloud Run) yang membatasi HTTP response non-streaming
+  // ke 32MB -- tanpa ini, response untuk file >32MB dipotong/ditolak oleh
+  // proxy platform sebelum sampai ke browser, dan yang tersimpan bukan PDF
+  // asli melainkan halaman error kecil (bukan bug di server kita, tapi limit
+  // dari platform hosting -- gejalanya: file selalu ~beberapa KB dan viewer
+  // gagal membukanya, persis seperti file corrupt).
+  const DOWNLOAD_RANGE_CHUNK = 20 * 1024 * 1024; // 20MB per request — aman di bawah batas 32MB
+  const DOWNLOAD_DIRECT_THRESHOLD = 25 * 1024 * 1024; // di bawah ini, download langsung
+
+  function triggerAnchorDownload(href, filename) {
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { try { a.remove(); } catch (_) {} }, 3000);
+  }
+
   async function downloadFile(filename, suggestedName) {
     try {
-      const finalName  = suggestedName || filename;
+      const finalName   = suggestedName || filename;
       const downloadUrl = `${API_BASE}/download/${encodeURIComponent(filename)}`;
 
-      // Selalu gunakan native browser download (<a download>) yang di-handle oleh
-      // download manager browser. Ini paling andal untuk file besar (40MB+) karena:
-      // - Tidak ada batasan memori JS (tidak perlu buffer seluruh file ke RAM)
-      // - Browser men-stream langsung ke disk
-      // - showSaveFilePicker + pipeTo() bisa terpotong di tengah jalan pada koneksi
-      //   lambat / file besar → hasil file 10KB bukan 40MB
-      const a = document.createElement('a');
-      a.href     = downloadUrl;
-      a.download = finalName;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      // Jangan hapus <a> langsung — browser butuh sedikit waktu memproses klik
-      setTimeout(() => { try { a.remove(); } catch (_) {} }, 3000);
+      // Cek dulu ukuran file lewat HEAD request untuk menentukan strategi
+      let totalSize = null;
+      try {
+        const headRes = await fetch(downloadUrl, { method: 'HEAD' });
+        if (headRes.ok) {
+          const cl = headRes.headers.get('Content-Length');
+          if (cl) totalSize = parseInt(cl, 10);
+        }
+      } catch (_) { /* HEAD gagal → tetap coba jalur download langsung di bawah */ }
+
+      if (totalSize === null || totalSize <= DOWNLOAD_DIRECT_THRESHOLD) {
+        triggerAnchorDownload(downloadUrl, finalName);
+        return;
+      }
+
+      // File besar → ambil per-bagian lewat HTTP Range request
+      const parts = [];
+      let start = 0;
+      let chunkIdx = 0;
+      const totalChunks = Math.ceil(totalSize / DOWNLOAD_RANGE_CHUNK);
+      while (start < totalSize) {
+        const end = Math.min(start + DOWNLOAD_RANGE_CHUNK, totalSize) - 1;
+        chunkIdx++;
+        showToast(`Mengunduh: bagian ${chunkIdx}/${totalChunks}...`, 'info');
+        const res = await fetch(downloadUrl, { headers: { Range: `bytes=${start}-${end}` } });
+        if (res.status !== 206 && res.status !== 200) {
+          throw new Error(`Gagal mengunduh bagian ${chunkIdx}/${totalChunks} (HTTP ${res.status})`);
+        }
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength === 0) throw new Error(`Bagian ${chunkIdx}/${totalChunks} kosong`);
+        parts.push(buf);
+        start = end + 1;
+      }
+
+      const blob = new Blob(parts, { type: 'application/pdf' });
+      if (blob.size !== totalSize) {
+        throw new Error(`Ukuran hasil unduhan (${blob.size} bytes) tidak cocok dengan ukuran file di server (${totalSize} bytes)`);
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      triggerAnchorDownload(blobUrl, finalName);
+      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch (_) {} }, 15000);
+      showToast('Download selesai.', 'success');
     } catch (err) {
       console.error(err);
       showToast('Gagal mengunduh file: ' + err.message, 'error');
