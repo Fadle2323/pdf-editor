@@ -1058,6 +1058,18 @@
       // untuk file besar). JANGAN fetch sebagai arrayBuffer karena untuk PDF 40MB+ akan
       // memuat seluruh file ke RAM browser dan bisa timeout/gagal.
       const url = `${API_BASE}/download/${encodeURIComponent(filename)}`;
+
+      // Verifikasi ukuran file dulu sebelum render. pdf.js memakai HTTP Range
+      // Requests, jadi ia bisa saja menampilkan sebagian PDF walau file di
+      // server sebenarnya corrupt/partial — cek ini mencegah viewer terlihat
+      // "normal" padahal file yang akan didownload nanti rusak.
+      const headRes = await fetch(url, { method: 'HEAD' });
+      if (!headRes.ok) throw new Error(`File tidak ditemukan (HTTP ${headRes.status})`);
+      const contentLength = headRes.headers.get('Content-Length');
+      if (contentLength && parseInt(contentLength, 10) < 500) {
+        throw new Error(`File terlalu kecil (${contentLength} bytes) — kemungkinan corrupt`);
+      }
+
       state.pdfDoc = await pdfjsLib.getDocument({ url, withCredentials: false }).promise;
       await renderAllPages();
     } catch (err) {
@@ -2756,7 +2768,7 @@
 
   // ================== UPLOAD ==================
   async function uploadFileInChunks(file, onProgress) {
-    const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB per chunk — aman untuk hampir semua konfigurasi proxy/nginx
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk — sequential, ~8 request untuk file 40MB
     if (file.size <= CHUNK_SIZE) {
       const formData = new FormData(); formData.append('file', file);
       if (onProgress) onProgress(1, 1, 100);
@@ -2816,7 +2828,13 @@
       pushHistory(uploadData.filename, `Dokumen diupload: ${file.name}`);
       setBackendEditControlsEnabled(true);
       showToast('Backend terhubung: mode edit aktif.', 'success');
-    } catch (err) { console.warn('Upload ke backend gagal, mode preview-only:', err.message); }
+    } catch (err) {
+      // JANGAN silent fail — tampilkan error yang jelas ke user dan biarkan
+      // fitur edit tetap nonaktif (sudah di-disable di awal fungsi ini).
+      console.error('Upload error:', err);
+      setBackendEditControlsEnabled(false);
+      showToast(`Upload gagal: ${err.message}. Fitur edit tidak tersedia.`, 'error');
+    }
   }
 
   const dropzone = document.getElementById('dropzone');

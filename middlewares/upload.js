@@ -42,7 +42,7 @@ const upload = multer({
 const uploadChunkMiddleware = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB — margin aman di atas chunk size 1MB
+    fileSize: 10 * 1024 * 1024, // 10MB — margin aman di atas chunk size 5MB
   },
 });
 
