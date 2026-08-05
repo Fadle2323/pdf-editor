@@ -484,16 +484,29 @@ async function addWatermark(filePath, { text, opacity, fontSize, color }) {
 
 /**
  * Mengenkripsi PDF dengan password.
- * Strategi: 1) qpdf binary  2) Pure-JS AES-128 PDF Standard Security Handler R4
+ * Strategi: 1) qpdf binary sistem (kalau tersedia -- tercepat)
+ *           2) qpdf yang dikompilasi ke WASM (@neslinesli93/qpdf-wasm) --
+ *              tidak butuh binary sistem apapun, jadi selalu bekerja di
+ *              lingkungan hosting manapun (container minimal, serverless, dst).
+ *
+ * PENTING: strategi lama di sini adalah implementasi kriptografi buatan
+ * sendiri ("RC4 approximation" via XOR chain) untuk PDF Standard Security
+ * Handler R4. Setelah diverifikasi dengan pikepdf & pdftk secara independen,
+ * terbukti implementasi itu SELALU menghasilkan PDF yang gagal dibuka --
+ * bahkan dengan password yang benar sekalipun -- karena O/U key derivation-nya
+ * tidak sesuai spesifikasi PDF. Setiap kali qpdf binary sistem tidak tersedia
+ * (umum terjadi di banyak platform hosting Node.js), fallback ini yang jalan,
+ * sehingga SEMUA export dengan password menghasilkan file yang tidak bisa
+ * dibuka. Diganti total dengan qpdf asli (native, lewat WASM) yang terbukti
+ * menghasilkan enkripsi valid dan bisa dibuka dengan password yang benar.
  */
 async function setPassword(filePath, password) {
   const { spawnSync } = require('child_process');
-  const crypto = require('crypto');
   ensureConvertedDir();
   const outName = `secured-${uuidv4()}.pdf`;
   const outPath = path.join(config.convertedDir, outName);
 
-  // ── 1. qpdf binary ───────────────────────────────────────────────────
+  // ── 1. qpdf binary sistem ────────────────────────────────────────────
   const safeEnv = {
     ...process.env,
     PATH: ['/usr/local/sbin','/usr/local/bin','/usr/sbin','/usr/bin','/sbin','/bin',
@@ -510,159 +523,55 @@ async function setPassword(filePath, password) {
     }
   }
 
-  // ── 2. Pure-JS AES-128 (PDF R4 / AESV2) ─────────────────────────────
-  // Tidak butuh binary atau WASM — hanya Node.js crypto + pdf-lib.
-  const KL = 16;
-  const PDF_PAD = Buffer.from([
-    0x28,0xBF,0x4E,0x5E,0x4E,0x75,0x8A,0x41,0x64,0x00,0x4E,0x56,
-    0xFF,0xFA,0x01,0x08,0x2E,0x2E,0x00,0xB6,0xD0,0x68,0x3E,0x80,
-    0x2F,0x0C,0xA9,0xFE,0x64,0x53,0x69,0x7A,
-  ]);
-
-  const padPwd = (p) => {
-    const b = Buffer.from(String(p||''),'latin1');
-    const o = Buffer.alloc(32);
-    b.copy(o, 0, 0, Math.min(b.length, 32));
-    if (b.length < 32) PDF_PAD.copy(o, b.length, 0, 32 - b.length);
-    return o;
-  };
-  // Approximate RC4 via XOR-chain (sufficient for PDF R4 O/U key derivation)
-  const xorChain = (key, data, rounds=20) => {
-    let d = Buffer.from(data);
-    for (let i = 0; i < rounds; i++) {
-      const xk = key.map((b) => b ^ i);
-      d = d.map((b, j) => b ^ xk[j % xk.length]);
-    }
-    return Buffer.from(d);
-  };
-  const computeEncKey = (u, O, pBuf, fid) => {
-    let h = crypto.createHash('md5').update(padPwd(u)).update(O).update(pBuf).update(fid).digest();
-    for (let i = 0; i < 50; i++) h = crypto.createHash('md5').update(h.slice(0,KL)).digest();
-    return h.slice(0, KL);
-  };
-  const computeO = (op, up) => {
-    let k = crypto.createHash('md5').update(padPwd(op)).digest();
-    for (let i = 0; i < 50; i++) k = crypto.createHash('md5').update(k.slice(0,KL)).digest();
-    return xorChain(k.slice(0,KL), padPwd(up));
-  };
-  const computeU = (ek, fid) => {
-    const h = crypto.createHash('md5').update(PDF_PAD).update(fid).digest();
-    return Buffer.concat([xorChain(ek, h), Buffer.alloc(16)]);
-  };
-  const aesEncObj = (ek, on, gn, data) => {
-    const ex = Buffer.alloc(5);
-    ex.writeUIntLE(on, 0, 3); ex.writeUIntLE(gn, 3, 2);
-    const objKey = crypto.createHash('md5').update(ek).update(ex)
-      .update(Buffer.from('sAlT')).digest().slice(0, Math.min(KL+5, 16));
-    const iv = crypto.randomBytes(16);
-    const pad = 16 - (data.length % 16);
-    const padded = Buffer.concat([data, Buffer.alloc(pad, pad)]);
-    const c = crypto.createCipheriv('aes-128-cbc', objKey, iv);
-    c.setAutoPadding(false);
-    return Buffer.concat([iv, c.update(padded), c.final()]);
-  };
-
-  const {
-    PDFDocument: PDFD, PDFName: PDFNm, PDFNumber: PDFNum, PDFBool, PDFDict,
-    PDFString: PDFStr, PDFHexString: PDFHex, PDFArray: PDFArr, PDFNull,
-  } = require('pdf-lib');
-
-  const raw = fs.readFileSync(filePath);
-  const pdfDoc = await PDFD.load(raw, { updateMetadata:false, ignoreEncryption:true });
-  const ctx = pdfDoc.context;
-
-  // File ID
-  let fid = crypto.randomBytes(16);
+  // ── 2. qpdf via WASM (tidak butuh binary sistem) ────────────────────
   try {
-    const idArr = ctx.trailerInfo.ID;
-    if (idArr && idArr.get) { const f = idArr.get(0); if (f && f.asBytes) fid = Buffer.from(f.asBytes()); }
-  } catch (_) {}
-
-  const P = -3904;
-  const pBuf = Buffer.alloc(4); pBuf.writeInt32LE(P, 0);
-  const O = computeO(password, password);
-  const encKey = computeEncKey(password, O, pBuf, fid.slice(0,16));
-  const U = computeU(encKey, fid.slice(0,16));
-  const fidHex = fid.slice(0,16).toString('hex');
-
-  // Build /Encrypt dictionary using PDFDict.withContext (supports nested dicts)
-  const stdCF = PDFDict.withContext(ctx);
-  stdCF.set(PDFNm.of('AuthEvent'), PDFNm.of('DocOpen'));
-  stdCF.set(PDFNm.of('CFM'),       PDFNm.of('AESV2'));
-  stdCF.set(PDFNm.of('Length'),    PDFNum.of(KL));
-
-  const cfDict = PDFDict.withContext(ctx);
-  cfDict.set(PDFNm.of('StdCF'), stdCF);
-
-  const encDict = PDFDict.withContext(ctx);
-  encDict.set(PDFNm.of('Filter'),          PDFNm.of('Standard'));
-  encDict.set(PDFNm.of('V'),               PDFNum.of(4));
-  encDict.set(PDFNm.of('R'),               PDFNum.of(4));
-  encDict.set(PDFNm.of('Length'),          PDFNum.of(128));
-  encDict.set(PDFNm.of('P'),               PDFNum.of(P));
-  encDict.set(PDFNm.of('O'),               PDFHex.of(O.toString('hex')));
-  encDict.set(PDFNm.of('U'),               PDFHex.of(U.toString('hex')));
-  encDict.set(PDFNm.of('EncryptMetadata'), PDFBool.True);
-  encDict.set(PDFNm.of('CF'),              cfDict);
-  encDict.set(PDFNm.of('StmF'),            PDFNm.of('StdCF'));
-  encDict.set(PDFNm.of('StrF'),            PDFNm.of('StdCF'));
-
-  const encRef = ctx.register(encDict);
-  ctx.trailerInfo.Encrypt = encRef;
-  ctx.trailerInfo.ID = ctx.obj([PDFHex.of(fidHex), PDFHex.of(fidHex)]);
-
-  // Encrypt ONLY string objects — skip streams entirely.
-  // Streams (images, fonts, page content) are NOT encrypted to prevent crashes
-  // on image-heavy PDFs (PPT exports, scanned docs) where pdf-lib cannot safely
-  // re-serialize large DCTDecode/FlateDecode streams during save().
-  // PDF readers still prompt for password via O/U key verification.
-  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
-    if (ref.objectNumber === encRef.objectNumber) continue;
-    const on = ref.objectNumber;
-    const gn = ref.generationNumber;
-
-    const encryptStr = (s) => {
-      try {
-        const b = s.asBytes ? Buffer.from(s.asBytes()) : Buffer.alloc(0);
-        if (!b || b.length === 0) return s;
-        return PDFHex.of(aesEncObj(encKey, on, gn, b).toString('hex'));
-      } catch (_) { return s; }
-    };
-
-    const walkDict = (dict) => {
-      if (!(dict instanceof PDFDict) || dict === encDict) return;
-      for (const [k, v] of dict.entries()) {
-        try {
-          if (v instanceof PDFStr || v instanceof PDFHex) dict.set(k, encryptStr(v));
-          else if (v instanceof PDFArr) walkArr(v);
-          else if (v instanceof PDFDict) walkDict(v);
-          // PDFRef, PDFNumber, PDFBool, PDFName: leave as-is
-        } catch (_) { /* skip corrupt/unknown entry */ }
-      }
-    };
-    const walkArr = (arr) => {
-      if (!(arr instanceof PDFArr)) return;
-      for (let i = 0; i < arr.size(); i++) {
-        try {
-          const v = arr.get(i);
-          if (v instanceof PDFStr || v instanceof PDFHex) arr.set(i, encryptStr(v));
-          else if (v instanceof PDFArr) walkArr(v);
-          else if (v instanceof PDFDict) walkDict(v);
-        } catch (_) { /* skip */ }
-      }
-    };
-
-    // Only process PDFDict and PDFArray — skip PDFRawStream (images/fonts/page streams)
-    if (obj instanceof PDFDict) walkDict(obj);
-    else if (obj instanceof PDFArr) walkArr(obj);
+    const outBytes = await encryptWithQpdfWasm(filePath, password);
+    fs.writeFileSync(outPath, outBytes);
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 100) {
+      throw new Error('Output PDF corrupt — enkripsi gagal');
+    }
+    return outName;
+  } catch (wasmErr) {
+    try { fs.unlinkSync(outPath); } catch (_) {}
+    throw new Error(`Gagal mengenkripsi PDF dengan password: ${wasmErr.message}`);
   }
-
-  const outBytes = await pdfDoc.save({ useObjectStreams:false, addDefaultPage:false });
-  fs.writeFileSync(outPath, outBytes);
-  if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 100)
-    throw new Error('Output PDF corrupt — enkripsi gagal');
-  return outName;
 }
+
+// Modul WASM diinisialisasi sekali (lazy) lalu dipakai ulang -- inisialisasi
+// WASM punya overhead, tapi setiap panggilan enkripsi memakai path file
+// virtual unik (berbasis uuid) supaya aman dipanggil untuk request bersamaan.
+let qpdfWasmModulePromise = null;
+function getQpdfWasmModule() {
+  if (!qpdfWasmModulePromise) {
+    const qpdfFactory = require('@neslinesli93/qpdf-wasm');
+    const wasmPath = path.join(
+      path.dirname(require.resolve('@neslinesli93/qpdf-wasm/package.json')),
+      'dist', 'qpdf.wasm'
+    );
+    qpdfWasmModulePromise = qpdfFactory({ locateFile: () => wasmPath });
+  }
+  return qpdfWasmModulePromise;
+}
+
+async function encryptWithQpdfWasm(filePath, password) {
+  const mod = await getQpdfWasmModule();
+  const id = uuidv4();
+  const inVPath = `/in-${id}.pdf`;
+  const outVPath = `/out-${id}.pdf`;
+  try {
+    const inBytes = fs.readFileSync(filePath);
+    mod.FS.writeFile(inVPath, inBytes);
+    const ret = mod.callMain(['--encrypt', password, password, '256', '--', inVPath, outVPath]);
+    if (ret !== 0) throw new Error(`qpdf-wasm keluar dengan kode ${ret}`);
+    const outBytes = mod.FS.readFile(outVPath);
+    if (!outBytes || outBytes.length === 0) throw new Error('qpdf-wasm tidak menghasilkan output');
+    return Buffer.from(outBytes);
+  } finally {
+    try { mod.FS.unlink(inVPath); } catch (_) {}
+    try { mod.FS.unlink(outVPath); } catch (_) {}
+  }
+}
+
 
 /**
  * Menambahkan annotation (highlight, shape, sticky note) ke PDF.
