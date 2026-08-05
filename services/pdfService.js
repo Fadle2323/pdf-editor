@@ -515,7 +515,12 @@ async function setPassword(filePath, password) {
   for (const c of ['/usr/bin/qpdf','/usr/local/bin/qpdf','/opt/homebrew/bin/qpdf','qpdf']) {
     const probe = spawnSync(c, ['--version'], { stdio:'pipe', env:safeEnv });
     if (!probe.error && probe.status === 0) {
-      const r = spawnSync(c, ['--encrypt', password, password, '256', '--', filePath, outPath],
+      // --warning-exit-0: qpdf keluar dengan kode 3 kalau cuma ada WARNING
+      // (bukan error) pada PDF sumber -- ini sangat umum untuk PDF hasil
+      // export PPT/scanner/dsb yang punya struktur sedikit non-standar tapi
+      // tetap valid. Tanpa flag ini, hasil yang sudah benar bisa dianggap
+      // gagal padahal outPath sudah berisi PDF terenkripsi yang valid.
+      const r = spawnSync(c, ['--warning-exit-0', '--encrypt', password, password, '256', '--', filePath, outPath],
         { stdio:'pipe', env:safeEnv });
       if (!r.error && r.status === 0 && fs.existsSync(outPath) && fs.statSync(outPath).size > 0)
         return outName;
@@ -561,10 +566,18 @@ async function encryptWithQpdfWasm(filePath, password) {
   try {
     const inBytes = fs.readFileSync(filePath);
     mod.FS.writeFile(inVPath, inBytes);
-    const ret = mod.callMain(['--encrypt', password, password, '256', '--', inVPath, outVPath]);
-    if (ret !== 0) throw new Error(`qpdf-wasm keluar dengan kode ${ret}`);
-    const outBytes = mod.FS.readFile(outVPath);
-    if (!outBytes || outBytes.length === 0) throw new Error('qpdf-wasm tidak menghasilkan output');
+    // --warning-exit-0: exit code 3 dari qpdf berarti WARNING, bukan error --
+    // PDF sumber tetap berhasil diproses dan outVPath tetap berisi output
+    // yang valid. Tanpa flag ini, PDF dengan struktur sedikit non-standar
+    // (umum pada hasil export PPT) akan salah dianggap gagal dienkripsi.
+    const ret = mod.callMain(['--warning-exit-0', '--encrypt', password, password, '256', '--', inVPath, outVPath]);
+    let outBytes;
+    try { outBytes = mod.FS.readFile(outVPath); } catch (_) { outBytes = null; }
+    // Jaga-jaga tambahan: kalau output benar-benar ada isinya, anggap berhasil
+    // walau exit code-nya bukan 0 (mis. kode lain yang tetap non-fatal).
+    if ((!outBytes || outBytes.length === 0)) {
+      throw new Error(`qpdf-wasm keluar dengan kode ${ret} dan tidak menghasilkan output`);
+    }
     return Buffer.from(outBytes);
   } finally {
     try { mod.FS.unlink(inVPath); } catch (_) {}
