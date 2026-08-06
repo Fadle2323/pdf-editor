@@ -178,6 +178,7 @@
           #app-aside { display: none !important; }
           #app-main { padding-left: 0 !important; flex-direction: column; }
           #left-section, #right-section { width: 100% !important; border-left: none !important; }
+          #right-sidebar-resizer { display: none !important; }
           #footer-copyright { display: none; }
         }
     </style>
@@ -304,7 +305,7 @@
 
 <main id="app-main" class="flex-1 flex md:pl-80 pt-16 pb-10 overflow-hidden">
 <!-- Left: PDF viewer (scroll vertikal, semua halaman) -->
-<section id="left-section" class="w-full md:w-3/5 relative bg-surface-container-lowest p-unit-6 overflow-auto custom-scrollbar">
+<section id="left-section" class="w-full md:flex-1 md:min-w-0 relative bg-surface-container-lowest p-unit-6 overflow-auto custom-scrollbar">
 
 <!-- Toolbar -->
 <div id="floating-toolbar" class="sticky top-0 z-30 mb-unit-6 flex items-center gap-unit-1 bg-white/90 backdrop-blur-md px-3 py-2 rounded-full border border-outline-variant pdf-page-shadow flex-wrap justify-center">
@@ -412,7 +413,8 @@
 </section>
 
 <!-- Right: Control Panel -->
-<section id="right-section" class="w-full md:w-2/5 border-l border-outline-variant bg-surface flex flex-col custom-scrollbar overflow-y-auto p-4 sm:p-gutter min-w-0">
+<section id="right-section" class="w-full md:w-2/5 md:flex-shrink-0 relative border-l border-outline-variant bg-surface flex flex-col custom-scrollbar overflow-y-auto p-4 sm:p-gutter min-w-0" style="min-width: 280px; max-width: 640px;">
+<div id="right-sidebar-resizer" class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/40 active:bg-primary transition-colors z-10" title="Geser untuk mengubah lebar panel"></div>
 
 <div class="mb-gutter min-w-0">
 <h3 class="font-headline-lg text-headline-lg mb-unit-2 text-on-surface">Manage File</h3>
@@ -3833,6 +3835,44 @@
     window.addEventListener('resize', () => {
       const currentWidth = parseInt(sidebar.style.width, 10) || 320;
       main.style.paddingLeft = isDesktop() ? currentWidth + 'px' : '';
+    });
+  })();
+
+  // Resize untuk panel kanan (#right-section) -- pola sama persis dengan
+  // sidebar kiri di atas, bedanya lebar dihitung dari tepi KANAN viewport
+  // (bukan dari kiri) karena resizer ada di sisi kiri panel ini. #left-section
+  // sudah diubah jadi md:flex-1 supaya otomatis mengisi sisa ruang tanpa
+  // perlu disinkronkan manual seperti #app-main di atas.
+  (function setupRightSectionResize() {
+    const rightSection = document.getElementById('right-section');
+    const resizer = document.getElementById('right-sidebar-resizer');
+    if (!rightSection || !resizer) return;
+
+    const MIN_WIDTH = 280;
+    const MAX_WIDTH = 640;
+    const isDesktop = () => window.matchMedia('(min-width: 768px)').matches;
+    let isResizing = false;
+
+    resizer.addEventListener('mousedown', (e) => {
+      if (!isDesktop()) return;
+      isResizing = true;
+      document.body.classList.add('select-none');
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const widthFromRightEdge = window.innerWidth - e.clientX;
+      const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, widthFromRightEdge));
+      rightSection.style.width = clamped + 'px';
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('select-none');
+      document.body.style.cursor = '';
     });
   })();
 
