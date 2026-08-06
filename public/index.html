@@ -439,6 +439,10 @@
 <button id="btn-delete-selection" class="w-full flex items-center gap-2 p-2.5 bg-surface-container-high rounded-lg hover:bg-error hover:text-on-error transition-all text-left font-label-sm min-w-0">
 <span class="material-symbols-outlined text-[18px] flex-shrink-0">delete</span> <span class="truncate min-w-0">Delete Semua Terpilih</span>
 </button>
+<select id="blur-snip-mode" class="w-full min-w-0 bg-surface border border-outline-variant rounded-lg text-label-sm py-2 px-2 text-ellipsis overflow-hidden mb-unit-2" title="Menentukan area mana yang disensor saat blur diterapkan pada hasil snip (drag) manual">
+<option value="text">Mode Snip: Deteksi Teks (sensor per kata yang terdeteksi)</option>
+<option value="area">Mode Snip: Area Penuh (sensor seluruh kotak snip)</option>
+</select>
 <div class="flex gap-unit-2 min-w-0 w-full items-center">
 <select id="blur-style" class="flex-1 min-w-0 w-full max-w-full bg-surface border border-outline-variant rounded-lg text-label-sm py-2 px-2 text-ellipsis overflow-hidden">
 <option value="normal">Blur Ringan</option>
@@ -2711,6 +2715,13 @@
     if (!state.selectedAreas.length) return;
     if (!requireBackendFile()) return;
     const style = document.getElementById('blur-style').value;
+    // Mode Snip: 'text' (default, PERILAKU LAMA -- jangan diubah) = area snip
+    // dipecah jadi rect per-kata yang terdeteksi di dalamnya, cuma kata itu
+    // yang disensor. 'area' (baru) = seluruh kotak snip disensor solid apa
+    // adanya, tanpa deteksi teks -- seperti ditimpa penuh sesuai area yang
+    // di-snip. Hanya berlaku utk area hasil DRAG-SNIP manual (area.wordIndex
+    // === undefined); area hasil klik kata satu-satu tetap seperti biasa.
+    const snipMode = document.getElementById('blur-snip-mode').value;
 
     // Feature 6: pratinjau sebelum blur: user bisa deselect area tertentu
     const confirmed = await showBlurPreview(state.selectedAreas, style);
@@ -2725,6 +2736,9 @@
       // kosong -> fallback ke 1 rect utuh. Sekarang dihitung ON-THE-FLY dulu
       // di sini utk setiap halaman yg relevan, sebelum splitting dilakukan --
       // tidak lagi bergantung apakah toggle pernah diklik atau tidak.
+      // (Tetap dihitung meski snipMode === 'area', karena area hasil klik
+      // kata satu-satu -- yang tidak terpengaruh mode ini -- masih butuh data
+      // ini, dan menghitungnya di awal juga aman/murah utk kasus lain.)
       const relevantPages = new Set(state.selectedAreas.map((a) => a.page + 1));
       for (const pageNum of relevantPages) await ensureWordBoxesForPage(getPageInfo(pageNum)); // eslint-disable-line no-await-in-loop
 
@@ -2736,15 +2750,27 @@
 
       const expandedAreas = [];
       state.selectedAreas.forEach((a) => {
+        if (snipMode === 'area' && a.wordIndex === undefined) {
+          // Mode Area Penuh: pakai kotak snip apa adanya, JANGAN dipecah
+          // per-kata -- ini yang membedakannya dari mode Deteksi Teks.
+          expandedAreas.push({ ...a });
+          return;
+        }
         const pageInfo = getPageInfo(a.page + 1);
         splitAreaIntoWordRects(pageInfo, a).forEach((rect) => expandedAreas.push({ ...rect, page: a.page }));
       });
 
       // Min-gap spacing: cegah rect per-kata yg bersebelahan rapat menyatu
       // scr visual jadi 1 balok -- dikelompokkan per halaman dulu krn gap
-      // hanya relevan dibandingkan antar rect di halaman yg sama.
+      // hanya relevan dibandingkan antar rect di halaman yg sama. Area hasil
+      // Mode Area Penuh SENGAJA dilewati di sini -- user memang mau seluruh
+      // kotak snip tertutup solid tanpa celah, beda dgn tujuan gap-spacing
+      // ini yang khusus utk rect per-kata (Mode Deteksi Teks).
       const areasByPage = {};
-      expandedAreas.forEach((a) => { (areasByPage[a.page] = areasByPage[a.page] || []).push(a); });
+      expandedAreas.forEach((a) => {
+        if (snipMode === 'area' && a.wordIndex === undefined) return;
+        (areasByPage[a.page] = areasByPage[a.page] || []).push(a);
+      });
       Object.values(areasByPage).forEach((rects) => applyMinGapSpacing(rects));
 
       const patches = expandedAreas.map((a) => {
@@ -2756,7 +2782,8 @@
       const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), patches }) });
       pushHistory(data.filename, `Blur diterapkan: ${document.getElementById('blur-style').selectedOptions[0].textContent} (${patches.length} area)`);
       await loadPdfFromServer(data.filename);
-      showToast(`${patches.length} area berhasil di-blur (dipecah per-kata jika perlu).`, 'success');
+      const modeLabel = snipMode === 'area' ? 'area penuh' : 'dipecah per-kata jika perlu';
+      showToast(`${patches.length} area berhasil di-blur (${modeLabel}).`, 'success');
     } catch (err) { reportUnexpectedError(err, 'Gagal menerapkan Blur. Coba lagi.'); } finally { setLoading(false); }
   });
 
