@@ -6,23 +6,36 @@ const {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   AlignmentType,
 } = require('docx');
 const ExcelJS = require('exceljs');
+const sharp = require('sharp');
 const config = require('../config');
 const { extractTextFromFile } = require('./textService');
 
-// Feature 4: Coba load pdfjs-dist (untuk ekstraksi terstruktur dgn info font).
-// Jika tidak ada, fallback ke pdf-parse (tetap bisa konversi, tapi tanpa
-// deteksi bold/italic/heading). Jalankan `npm install pdfjs-dist` untuk
-// mengaktifkan fitur format lengkap.
-let pdfjsLib = null;
-try {
-  pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
-} catch (_) {
-  // pdfjs-dist tidak terinstall - konversi Word tetap berfungsi lewat
-  // pdf-parse, tapi tanpa deteksi heading/bold/italic.
+// Feature 4: Ekstraksi terstruktur (heading/bold/italic/gambar) via pdfjs-dist.
+// Jika gagal load, fallback ke pdf-parse (tetap bisa konversi, tapi teks polos
+// tanpa formatting maupun gambar).
+//
+// PENTING: pdfjs-dist v6.x sudah ESM-only -- TIDAK ADA LAGI build CommonJS
+// (file 'legacy/build/pdf.js' tidak eksis di versi ini). require() untuk path
+// itu akan SELALU throw, tertangkap oleh catch, dan diam-diam membuat seluruh
+// fitur formatting di bawah ini tidak pernah berjalan sama sekali -- inilah
+// akar bug "hasil convert Word cuma teks polos tanpa formatting/gambar".
+// Fix: pakai dynamic import() ke path '.mjs' yang benar, dan load LAZY (bukan
+// di top-level module, karena top-level await tidak tersedia di CommonJS).
+let pdfjsLibPromise = null;
+function loadPdfjsLib() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import('pdfjs-dist/legacy/build/pdf.mjs').catch((err) => {
+      console.warn('[convertToWord] Gagal load pdfjs-dist, fallback ke pdf-parse:', err.message);
+      pdfjsLibPromise = null; // izinkan retry di request berikutnya
+      return null;
+    });
+  }
+  return pdfjsLibPromise;
 }
 
 function ensureConvertedDir() {
@@ -66,13 +79,107 @@ function average(arr) {
   return arr.reduce((s, v) => s + v, 0) / arr.length;
 }
 
+// Kalikan 2 matrix transformasi PDF ([a,b,c,d,e,f], format standar PDF content
+// stream) -- dipakai utk melacak CTM (current transformation matrix) sepanjang
+// operator list, supaya tahu posisi & ukuran TAMPILAN tiap gambar di halaman.
+function multiplyMatrix(a, b) {
+  return [
+    a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
+    a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+    a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5],
+  ];
+}
+
 /**
- * Ekstrak konten terstruktur dari PDF menggunakan pdfjs-dist.
- * Mengembalikan array block: { type, newParagraph, runs: [{text, bold, italic, sizePt}] }
+ * Ekstrak semua gambar (paintImageXObject) dari satu halaman, lengkap dengan
+ * posisi Y (koordinat PDF, dari bawah -- konsisten dgn groupItemsIntoLines)
+ * dan ukuran tampilannya di halaman (bukan resolusi piksel asli), supaya bisa
+ * disisipkan pada urutan baca yang benar di antara baris-baris teks.
  */
-async function extractStructuredContent(filePath) {
+async function extractImagesFromPage(pdfjsLib, page) {
+  const OPS = pdfjsLib.OPS;
+  const opList = await page.getOperatorList();
+  const seenPng = new Map(); // cache per nama gambar -- 1 gambar bisa dipakai berkali-kali
+  const images = [];
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+
+  for (let i = 0; i < opList.fnArray.length; i += 1) {
+    const fn = opList.fnArray[i];
+    if (fn === OPS.save) {
+      stack.push(ctm);
+    } else if (fn === OPS.restore) {
+      ctm = stack.pop() || ctm;
+    } else if (fn === OPS.transform) {
+      ctm = multiplyMatrix(opList.argsArray[i], ctm);
+    } else if (fn === OPS.paintImageXObject) {
+      const imgName = opList.argsArray[i][0];
+      const dispWidthPt = Math.hypot(ctm[0], ctm[1]);
+      const dispHeightPt = Math.hypot(ctm[2], ctm[3]);
+      const topY = ctm[5] + dispHeightPt; // tepi ATAS gambar, koordinat PDF (dari bawah)
+      images.push({
+        name: imgName, y: topY, dispWidthPt, dispHeightPt,
+      });
+    }
+  }
+
+  const results = [];
+  for (const img of images) { // eslint-disable-line no-restricted-syntax
+    if (img.dispWidthPt < 3 || img.dispHeightPt < 3) continue; // eslint-disable-line no-continue -- lewati gambar dekoratif super kecil (mis. bullet/ikon 1x1)
+    try {
+      let pngBuffer = seenPng.get(img.name);
+      let pxWidth;
+      let pxHeight;
+      if (!pngBuffer) {
+        const obj = await new Promise((resolve, reject) => { // eslint-disable-line no-await-in-loop
+          try { page.objs.get(img.name, resolve); } catch (e) { reject(e); }
+        });
+        if (!obj || !obj.data || !obj.width || !obj.height) continue; // eslint-disable-line no-continue
+        // ImageKind: 1=GRAYSCALE_1BPP (bit-packed, jarang di PDF modern -- di-
+        // lewati drpd salah unpack), 2=RGB_24BPP, 3=RGBA_32BPP.
+        if (obj.kind === 1) continue; // eslint-disable-line no-continue
+        const channels = obj.kind === 3 ? 4 : 3;
+        pngBuffer = await sharp(Buffer.from(obj.data), { // eslint-disable-line no-await-in-loop
+          raw: { width: obj.width, height: obj.height, channels },
+        }).png().toBuffer();
+        pxWidth = obj.width; pxHeight = obj.height;
+        seenPng.set(img.name, pngBuffer);
+      }
+      results.push({
+        type: 'image', y: img.y, pngBuffer, dispWidthPt: img.dispWidthPt, dispHeightPt: img.dispHeightPt, pxWidth, pxHeight,
+      });
+    } catch (imgErr) {
+      console.warn('[convertToWord] Gagal ekstrak gambar', img.name, ':', imgErr.message);
+    }
+  }
+  return results;
+}
+
+// pdfjs-dist TIDAK mengekspos nama font PDF asli lewat getTextContent() --
+// item.fontName cuma ID internal (mis. "g_d0_f2"), bukan nama font
+// sesungguhnya (yang seringkali di-subset/di-embed & tak akan ada di
+// komputer pembaca manapun). Yang tersedia hanya kategori CSS generik lewat
+// content.styles[fontName].fontFamily ('sans-serif'/'serif'/'monospace') --
+// dipetakan ke font Word yang wajar, jauh lebih aman drpd meneruskan ID
+// internal itu sbg nama font (yang akan diabaikan/salah render di Word).
+function mapGenericFontFamily(cssFamily) {
+  if (!cssFamily) return undefined;
+  if (/monospace/i.test(cssFamily)) return 'Courier New';
+  if (/serif/i.test(cssFamily) && !/sans/i.test(cssFamily)) return 'Times New Roman';
+  if (/sans-serif/i.test(cssFamily)) return 'Calibri';
+  return undefined;
+}
+
+/**
+ * Ekstrak konten terstruktur dari PDF menggunakan pdfjs-dist: teks dengan
+ * formatting (heading/bold/italic/ukuran font) DAN gambar, digabung dalam
+ * satu urutan baca (atas ke bawah) per halaman.
+ * Mengembalikan array block: { type, newParagraph, runs } utk teks, atau
+ * { type: 'image', ... } utk gambar.
+ */
+async function extractStructuredContent(filePath, pdfjsLib) {
   const data = new Uint8Array(fs.readFileSync(filePath));
-  const doc = await pdfjsLib.getDocument({ data }).promise;
+  const doc = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
   const blocks = [];
 
   // Pass 1: hitung rata-rata ukuran font di seluruh dokumen
@@ -86,15 +193,25 @@ async function extractStructuredContent(filePath) {
   }
   const docAvgFontSize = average(allFontSizes) || 12;
 
-  // Pass 2: ekstrak struktur per halaman
+  // Pass 2: ekstrak struktur per halaman (teks + gambar, digabung urutan baca)
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p); // eslint-disable-line no-await-in-loop
     const content = await page.getTextContent(); // eslint-disable-line no-await-in-loop
-    const lines = groupItemsIntoLines(content.items);
+    const lines = groupItemsIntoLines(content.items).map((l) => ({ ...l, type: 'line' }));
+    const images = await extractImagesFromPage(pdfjsLib, page); // eslint-disable-line no-await-in-loop
 
-    lines.forEach((line, i) => {
+    // Gabungkan baris teks & gambar jadi satu urutan baca: y makin besar =
+    // makin ke atas halaman (koordinat PDF), jadi urutkan DESCENDING.
+    const merged = [...lines, ...images].sort((a, b) => b.y - a.y);
+
+    merged.forEach((entry, i) => {
+      if (entry.type === 'image') {
+        blocks.push(entry);
+        return;
+      }
+      const line = entry;
       if (!line.items.length) return;
-      const prevLine = lines[i - 1];
+      const prevLine = merged[i - 1];
       const gapAbove = prevLine ? Math.abs(line.y - prevLine.y) - prevLine.height : 0;
       const avgFontSize = average(line.items.map((it) => Math.abs(it.height) || docAvgFontSize));
 
@@ -111,7 +228,12 @@ async function extractStructuredContent(filePath) {
           text: it.str,
           bold: it.fontName ? /bold/i.test(it.fontName) : false,
           italic: it.fontName ? /italic|oblique/i.test(it.fontName) : false,
-          sizePt: Math.round((Math.abs(it.height) || docAvgFontSize) / 1.333),
+          // item.height dari pdfjs-dist SUDAH dalam satuan point (satuan yg sama
+          // dgn page.view/koordinat PDF) -- BUKAN pixel@96dpi, jadi TIDAK PERLU
+          // dibagi 96/72. Pembagian itu ada di versi sebelumnya & membuat semua
+          // ukuran font di hasil Word 25% lebih kecil dari aslinya di PDF.
+          sizePt: Math.round(Math.abs(it.height) || docAvgFontSize),
+          font: mapGenericFontFamily(content.styles[it.fontName] && content.styles[it.fontName].fontFamily),
         }));
 
       if (runs.length) {
@@ -125,8 +247,13 @@ async function extractStructuredContent(filePath) {
   return blocks;
 }
 
+// Lebar konten halaman Word standar (A4/Letter, margin default docx.js ~1in
+// tiap sisi) dalam pixel @96dpi -- dipakai utk membatasi ukuran gambar supaya
+// tidak meluber keluar halaman, sambil menjaga rasio aspek aslinya.
+const MAX_IMAGE_WIDTH_PX = 550;
+
 /**
- * Konversi block terstruktur menjadi paragraf docx dengan formatting.
+ * Konversi block terstruktur menjadi paragraf docx dengan formatting & gambar.
  */
 function blocksToDocxParagraphs(blocks) {
   const paragraphs = [];
@@ -135,10 +262,32 @@ function blocksToDocxParagraphs(blocks) {
       paragraphs.push(new Paragraph({ pageBreakBefore: true, children: [] }));
       return;
     }
+    if (block.type === 'image') {
+      // Konversi ukuran tampilan dari PDF (points) ke pixel @96dpi (konvensi
+      // docx.js utk ImageRun.transformation), lalu batasi ke lebar maksimum
+      // halaman sambil menjaga rasio aspek.
+      const PT_TO_PX = 96 / 72;
+      let widthPx = block.dispWidthPt * PT_TO_PX;
+      let heightPx = block.dispHeightPt * PT_TO_PX;
+      if (widthPx > MAX_IMAGE_WIDTH_PX) {
+        const scale = MAX_IMAGE_WIDTH_PX / widthPx;
+        widthPx *= scale; heightPx *= scale;
+      }
+      paragraphs.push(new Paragraph({
+        spacing: { before: 120, after: 120 },
+        alignment: AlignmentType.CENTER,
+        children: [new ImageRun({
+          data: block.pngBuffer,
+          transformation: { width: Math.round(widthPx), height: Math.round(heightPx) },
+        })],
+      }));
+      return;
+    }
     const children = block.runs.map((r) => new TextRun({
       text: r.text,
       bold: r.bold,
       italics: r.italic,
+      font: r.font,
       size: r.sizePt > 0 ? r.sizePt * 2 : undefined, // docx half-points
     }));
     if (!children.length) return;
@@ -174,14 +323,14 @@ async function convertToTxt(filePath) {
 async function convertToWord(filePath) {
   let paragraphs;
 
+  const pdfjsLib = await loadPdfjsLib();
   if (pdfjsLib) {
-    // Jalur utama: pdfjs-dist dengan formatting
+    // Jalur utama: pdfjs-dist dengan formatting + gambar
     try {
-      const blocks = await extractStructuredContent(filePath);
+      const blocks = await extractStructuredContent(filePath, pdfjsLib);
       paragraphs = blocksToDocxParagraphs(blocks);
     } catch (err) {
       console.warn('[convertToWord] pdfjs-dist gagal, fallback ke pdf-parse:', err.message);
-      pdfjsLib = null; // nonaktifkan untuk request berikutnya jika terus gagal
     }
   }
 
