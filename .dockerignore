@@ -1,0 +1,9 @@
+node_modules/
+.git/
+.env
+uploads/*
+!uploads/.gitkeep
+converted/*
+!converted/.gitkeep
+npm-debug.log
+*.md

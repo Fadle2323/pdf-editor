@@ -1,0 +1,5 @@
+# Dipakai oleh scripts/pdf_to_docx.py -- konversi PDF->Word dengan tabel &
+# layout asli (dipanggil sbg subprocess dari services/convertService.js).
+# Versi di-pin ke yang sudah diuji; dependency turunannya (PyMuPDF,
+# python-docx, opencv-python-headless, dst) dibiarkan resolve otomatis.
+pdf2docx==0.5.13

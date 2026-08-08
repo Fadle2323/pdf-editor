@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 const {
   Document,
@@ -364,6 +365,41 @@ function blocksToDocxParagraphs(blocks) {
   return paragraphs;
 }
 
+/**
+ * Coba konversi lewat pdf2docx (Python), yang bisa merekonstruksi tabel asli,
+ * deteksi justify, dan positioning yang lebih presisi drpd jalur pdfjs-dist.
+ * Return nama file output kalau berhasil, atau null kalau Python/pdf2docx
+ * tidak tersedia atau gagal (supaya convertToWord bisa fallback dgn aman --
+ * ini BUKAN error fatal, cuma sinyal "coba jalur lain").
+ */
+function tryPdf2docx(filePath, outputPath) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'pdf_to_docx.py');
+    // Coba 'python3' dulu (standar di image Docker Linux), fallback ke
+    // 'python' kalau tidak ada -- pola sama spt probe multi-path qpdf.
+    const candidates = ['python3', 'python'];
+
+    const tryNext = (i) => {
+      if (i >= candidates.length) { resolve(null); return; }
+      const bin = candidates[i];
+      const proc = spawn(bin, [scriptPath, filePath, outputPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => tryNext(i + 1)); // binary tidak ditemukan -> coba kandidat berikutnya
+      proc.on('close', (code) => {
+        if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+          resolve(outputPath);
+        } else {
+          console.warn(`[convertToWord] pdf2docx (${bin}) gagal (exit ${code}), fallback ke pdfjs-dist:`, stderr.trim().slice(-300));
+          try { fs.unlinkSync(outputPath); } catch (_) { /* mungkin belum sempat dibuat */ }
+          resolve(null);
+        }
+      });
+    };
+    tryNext(0);
+  });
+}
+
 // ================== PUBLIC API ==================
 
 async function convertToTxt(filePath) {
@@ -378,17 +414,24 @@ async function convertToTxt(filePath) {
 }
 
 /**
- * Konversi PDF -> Word (.docx).
- * Feature 4: jika pdfjs-dist tersedia, gunakan ekstraksi terstruktur dengan
- * deteksi heading, bold/italic, dan paragraph break. Jika tidak, fallback ke
- * pdf-parse (polos, tapi tidak error).
+ * Konversi PDF -> Word (.docx). Strategi 3 lapis, dari yang paling lengkap:
+ * 1) pdf2docx (Python, via Docker) -- tabel asli, justify, layout presisi.
+ * 2) pdfjs-dist (JS) -- heading/bold/italic/gambar/alignment, tanpa tabel.
+ * 3) pdf-parse -- teks polos, fallback terakhir yang selalu berhasil.
  */
 async function convertToWord(filePath) {
+  ensureConvertedDir();
+  const outputName = `converted-${uuidv4()}.docx`;
+  const outputPath = path.join(config.convertedDir, outputName);
+
+  const pdf2docxResult = await tryPdf2docx(filePath, outputPath);
+  if (pdf2docxResult) return outputName;
+
   let paragraphs;
 
   const pdfjsLib = await loadPdfjsLib();
   if (pdfjsLib) {
-    // Jalur utama: pdfjs-dist dengan formatting + gambar
+    // Jalur ke-2: pdfjs-dist dengan formatting + gambar
     try {
       const blocks = await extractStructuredContent(filePath, pdfjsLib);
       paragraphs = blocksToDocxParagraphs(blocks);
@@ -398,7 +441,7 @@ async function convertToWord(filePath) {
   }
 
   if (!paragraphs) {
-    // Fallback: pdf-parse (teks polos, satu Paragraph per baris)
+    // Fallback terakhir: pdf-parse (teks polos, satu Paragraph per baris)
     const { text } = await extractTextFromFile(filePath);
     assertHasExtractableText(text);
     paragraphs = text
@@ -415,9 +458,6 @@ async function convertToWord(filePath) {
     }],
   });
 
-  ensureConvertedDir();
-  const outputName = `converted-${uuidv4()}.docx`;
-  const outputPath = path.join(config.convertedDir, outputName);
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(outputPath, buffer);
   return outputName;
