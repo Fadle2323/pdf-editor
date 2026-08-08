@@ -70,8 +70,55 @@ function groupItemsIntoLines(items, tolerance = 3) {
     line.items.push(item);
     line.height = Math.max(line.height, height);
   });
+  lines.forEach((line) => {
+    line.startX = Math.min(...line.items.map((it) => it.transform[4]));
+    line.endX = Math.max(...line.items.map((it) => it.transform[4] + (it.width || 0)));
+  });
   // Balik urutan: PDF y bertambah ke atas, kita ingin atas-ke-bawah
   return lines.reverse();
+}
+
+/**
+ * Cari nilai yang paling sering muncul dalam array angka, dibulatkan ke
+ * kelipatan bucketSize dulu supaya toleran thd variasi kecil (mis. 71.8 vs
+ * 72.3 dianggap sama kalau bucketSize=3).
+ */
+function computeModeBucket(values, bucketSize) {
+  if (!values.length) return 0;
+  const counts = new Map();
+  values.forEach((v) => {
+    const bucket = Math.round(v / bucketSize) * bucketSize;
+    counts.set(bucket, (counts.get(bucket) || 0) + 1);
+  });
+  let mode = values[0];
+  let maxCount = 0;
+  counts.forEach((count, bucket) => {
+    if (count > maxCount) { maxCount = count; mode = bucket; }
+  });
+  return mode;
+}
+
+/**
+ * Deteksi alignment (kiri/tengah) tiap baris teks dalam satu halaman,
+ * berdasarkan margin-kiri dominan yang sudah dihitung sekali utk SELURUH
+ * dokumen (commonLeftX -- lihat catatan di extractStructuredContent soal
+ * kenapa ini harus dihitung global, bukan per-halaman).
+ */
+function detectLineAlignment(lines, pageWidth, commonLeftX) {
+  const pageCenterX = pageWidth / 2;
+  const CENTER_TOLERANCE = 15;
+  const LEFT_MARGIN_TOLERANCE = 6;
+
+  lines.forEach((line) => {
+    const centerX = (line.startX + line.endX) / 2;
+    if (Math.abs(line.startX - commonLeftX) <= LEFT_MARGIN_TOLERANCE) {
+      line.alignment = 'left';
+    } else if (Math.abs(centerX - pageCenterX) <= CENTER_TOLERANCE) {
+      line.alignment = 'center';
+    } else {
+      line.alignment = 'left'; // default aman kalau tidak jelas kasusnya
+    }
+  });
 }
 
 function average(arr) {
@@ -182,22 +229,35 @@ async function extractStructuredContent(filePath, pdfjsLib) {
   const doc = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
   const blocks = [];
 
-  // Pass 1: hitung rata-rata ukuran font di seluruh dokumen
+  // Pass 1: kumpulkan baris tiap halaman (di-cache, dipakai lagi di pass 2 --
+  // supaya tidak nge-group ulang), sekaligus kumpulkan statistik SELURUH
+  // dokumen: rata-rata ukuran font & margin-kiri yang paling umum dipakai.
+  //
+  // Margin-kiri dihitung GLOBAL (bukan per-halaman) supaya klaster kecil yg
+  // startX-nya kebetulan sama di SATU halaman (mis. daftar nama penulis di
+  // cover, rata-kiri thd satu sama lain tapi bloknya sendiri di-tengah-kan)
+  // tidak salah dianggap sbg margin body-text -- margin body-text asli akan
+  // mendominasi begitu dihitung dari SEMUA halaman sekaligus.
+  const pageLines = [];
   const allFontSizes = [];
-  for (let p = 1; p <= doc.numPages; p++) {
-    const page = await doc.getPage(p); // eslint-disable-line no-await-in-loop
-    const content = await page.getTextContent(); // eslint-disable-line no-await-in-loop
-    content.items.forEach((it) => {
-      if (it.height > 0) allFontSizes.push(Math.abs(it.height));
-    });
-  }
-  const docAvgFontSize = average(allFontSizes) || 12;
-
-  // Pass 2: ekstrak struktur per halaman (teks + gambar, digabung urutan baca)
+  const allStartX = [];
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p); // eslint-disable-line no-await-in-loop
     const content = await page.getTextContent(); // eslint-disable-line no-await-in-loop
     const lines = groupItemsIntoLines(content.items).map((l) => ({ ...l, type: 'line' }));
+    pageLines.push({ page, lines, styles: content.styles });
+    content.items.forEach((it) => {
+      if (it.height > 0) allFontSizes.push(Math.abs(it.height));
+    });
+    lines.forEach((l) => allStartX.push(l.startX));
+  }
+  const docAvgFontSize = average(allFontSizes) || 12;
+  const commonLeftX = computeModeBucket(allStartX, 3);
+
+  // Pass 2: ekstrak struktur per halaman (teks + gambar, digabung urutan baca)
+  for (let p = 1; p <= doc.numPages; p++) {
+    const { page, lines, styles } = pageLines[p - 1];
+    detectLineAlignment(lines, page.view[2], commonLeftX);
     const images = await extractImagesFromPage(pdfjsLib, page); // eslint-disable-line no-await-in-loop
 
     // Gabungkan baris teks & gambar jadi satu urutan baca: y makin besar =
@@ -233,11 +293,13 @@ async function extractStructuredContent(filePath, pdfjsLib) {
           // dibagi 96/72. Pembagian itu ada di versi sebelumnya & membuat semua
           // ukuran font di hasil Word 25% lebih kecil dari aslinya di PDF.
           sizePt: Math.round(Math.abs(it.height) || docAvgFontSize),
-          font: mapGenericFontFamily(content.styles[it.fontName] && content.styles[it.fontName].fontFamily),
+          font: mapGenericFontFamily(styles[it.fontName] && styles[it.fontName].fontFamily),
         }));
 
       if (runs.length) {
-        blocks.push({ type: isHeading ? 'heading' : 'paragraph', newParagraph: isNewParagraph, runs });
+        blocks.push({
+          type: isHeading ? 'heading' : 'paragraph', newParagraph: isNewParagraph, runs, alignment: line.alignment,
+        });
       }
     });
 
@@ -294,6 +356,7 @@ function blocksToDocxParagraphs(blocks) {
     const para = new Paragraph({
       heading: block.type === 'heading' ? HeadingLevel.HEADING_1 : undefined,
       spacing: block.newParagraph ? { before: 120 } : undefined,
+      alignment: block.alignment === 'center' ? AlignmentType.CENTER : undefined,
       children,
     });
     paragraphs.push(para);
