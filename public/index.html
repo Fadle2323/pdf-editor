@@ -349,6 +349,10 @@
 <button id="tool-esign" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Buat & tempel tanda tangan">
 <span class="material-symbols-outlined text-[18px]">draw</span> E-Sign
 </button>
+<button id="tool-insertimage" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Sisipkan gambar JPG/PNG -- pilih file lalu klik di halaman, atau drag &amp; drop langsung ke halaman">
+<span class="material-symbols-outlined text-[18px]">add_photo_alternate</span> Sisipkan Gambar
+</button>
+<input type="file" id="insert-image-file-input" accept="image/jpeg,image/png" style="display:none" />
 <div class="h-4 w-px bg-outline-variant"></div>
 <button id="tool-highlight" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Highlight teks (drag untuk membuat area highlight)">
 <span class="material-symbols-outlined text-[18px]">border_color</span> Highlight
@@ -779,7 +783,7 @@
   function setLoading(v) { document.getElementById('loading-overlay').classList.toggle('active', v); }
   function setEnabled(id, v) { document.getElementById(id).classList.toggle('btn-disabled', !v); }
   function setBackendEditControlsEnabled(v) {
-    ['btn-convert', 'btn-split', 'btn-compress', 'btn-export-pdf', 'tool-esign',
+    ['btn-convert', 'btn-split', 'btn-compress', 'btn-export-pdf', 'tool-esign', 'tool-insertimage',
       'btn-strip-metadata', 'btn-watermark', 'tool-highlight', 'tool-shape', 'tool-stickynote',
       'btn-open-find'].forEach((id) => setEnabled(id, v));
   }
@@ -801,7 +805,7 @@
     const count = state.annotations.length;
     const label = document.getElementById('export-btn-label');
     if (count > 0) {
-      el.textContent = `${count} perubahan (teks/tanda tangan) belum permanen: klik "Export PDF" untuk menyimpan.`;
+      el.textContent = `${count} perubahan (teks/tanda tangan/gambar) belum permanen: klik "Export PDF" untuk menyimpan.`;
       el.classList.remove('hidden');
       label.textContent = `Export PDF (${count} pending)`;
     } else {
@@ -1198,7 +1202,7 @@
 
       state.pages.push({
         pageNum, wrapper, canvas, overlay, pdfPage: page, viewport,
-        pageHeightPts: page.view[3], wordBoxes: [], wordBoxesComputed: false,
+        pageHeightPts: page.view[3], pageWidthPts: page.view[2], wordBoxes: [], wordBoxesComputed: false,
       });
     }
 
@@ -1992,7 +1996,7 @@
     const pageIdx = pageInfo.pageNum - 1;
     state.annotations.filter((a) => a.page === pageIdx).forEach((ann) => {
       if (ann.type === 'text') renderTextAnnotation(pageInfo, ann);
-      else if (ann.type === 'signature') renderSignatureAnnotation(pageInfo, ann);
+      else if (ann.type === 'signature' || ann.type === 'image') renderSignatureAnnotation(pageInfo, ann);
       else if (ann.type === 'highlight') renderHighlightAnnotation(pageInfo, ann);
       else if (ann.type === 'shape') renderShapeAnnotation(pageInfo, ann);
       else if (ann.type === 'stickynote') renderStickyNoteAnnotation(pageInfo, ann);
@@ -2206,6 +2210,54 @@
     showToast('Tanda tangan ditempatkan. Bisa digeser/resize kapan saja sebelum Export.', 'success');
   }
 
+  // Sisipkan gambar JPG/PNG bebas posisi -- pola sama persis dgn tanda tangan
+  // (keduanya cuma "gambar yang bisa digeser/resize", dikirim ke backend lewat
+  // endpoint /apply-patches yang sama), bedanya ukuran awal ngikutin rasio
+  // aspek gambar asli (bukan kotak tetap 160x60 spt tanda tangan) supaya tidak
+  // gepeng/melar saat pertama ditempatkan.
+  function addImageAnnotationAt(pageInfo, canvasX, canvasY) {
+    if (!state.pendingImage) return;
+    const { base64, naturalWidth, naturalHeight } = state.pendingImage;
+    const aspect = naturalWidth && naturalHeight ? naturalWidth / naturalHeight : 1;
+    // Lebar awal wajar: separuh lebar halaman, dibatasi max 300pt, min 40pt
+    let widthPt = Math.min(300, Math.max(40, pageInfo.pageWidthPts * 0.4));
+    let heightPt = widthPt / (aspect || 1);
+    // Kalau ternyata gambarnya sangat landscape/portrait ekstrem, jaga tinggi
+    // tetap masuk akal (maks 300pt) dgn re-scale proporsional dari sisi itu.
+    if (heightPt > 300) { heightPt = 300; widthPt = heightPt * aspect; }
+
+    const pdfRect = canvasRectToPdfRect(pageInfo, { x: canvasX, y: canvasY, width: widthPt * state.scale, height: heightPt * state.scale });
+    const ann = {
+      id: 'ann' + (++state.annotationIdCounter), type: 'image', page: pageInfo.pageNum - 1,
+      xPt: pdfRect.x, yPt: pdfRect.y, widthPt: pdfRect.width, heightPt: pdfRect.height, imageBase64: base64,
+    };
+    state.annotations.push(ann);
+    state.activeTool = 'default'; setToolHint(null); state.pendingImage = null;
+    renderAllOverlays();
+    showToast('Gambar ditempatkan. Bisa digeser/resize kapan saja sebelum Export.', 'success');
+  }
+
+  // Baca File gambar (dari <input type=file> ATAU drag&drop) jadi base64 +
+  // ukuran aslinya (dipakai utk rasio aspek default box saat ditempatkan).
+  function readImageFileAsPending(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\/(jpeg|png)$/.test(file.type)) {
+        reject(new Error('File harus berformat JPG atau PNG.'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Gagal membaca file gambar.'));
+      reader.onload = () => {
+        const base64 = reader.result;
+        const img = new Image();
+        img.onload = () => resolve({ base64, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+        img.onerror = () => reject(new Error('File gambar tidak valid/corrupt.'));
+        img.src = base64;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   // ---- Format bar (font/bold/italic/underline/list/warna) ----
   function showFormatBarFor(ann, onChangeApplied) {
     state.activeTextAnnotationId = ann.id;
@@ -2299,6 +2351,7 @@
     const { x, y } = getPos(pageInfo, e);
     if (state.activeTool === 'addtext') { addTextAnnotationAt(pageInfo, x, y); return; }
     if (state.activeTool === 'esignplace') { addSignatureAnnotationAt(pageInfo, x, y); return; }
+    if (state.activeTool === 'imageplace') { addImageAnnotationAt(pageInfo, x, y); return; }
     // CATATAN: pembatalan seleksi ("klik area kosong = clear") SUDAH ditangani
     // di handler mouseup (lihat di atas) berdasarkan jarak drag. Jangan panggil
     // clearSelection() lagi di sini -- 'click' selalu ikut terpicu tepat setelah
@@ -2871,6 +2924,51 @@
     setToolHint('Klik di halaman untuk menempatkan tanda tangan.');
   });
 
+  // ================== SISIPKAN GAMBAR (JPG/PNG, posisi bebas) ==================
+  // Dua cara: (1) klik tombol -> pilih file -> klik di halaman utk menempatkan
+  // (pola sama dgn E-Sign), atau (2) drag & drop file gambar langsung ke atas
+  // halaman PDF -- ditempatkan langsung di titik drop-nya, tanpa perlu klik dulu.
+  document.getElementById('tool-insertimage').addEventListener('click', () => {
+    document.getElementById('insert-image-file-input').click();
+  });
+  document.getElementById('insert-image-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // reset supaya bisa pilih file yg sama lagi nanti
+    if (!file) return;
+    try {
+      state.pendingImage = await readImageFileAsPending(file);
+      state.activeTool = 'imageplace';
+      setToolHint('Klik di halaman untuk menempatkan gambar.');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  pagesContainer.addEventListener('dragover', (e) => {
+    // Cuma cegah default (izinkan drop) kalau yg di-drag memang file, supaya
+    // tidak mengganggu drag internal lain (mis. drag-resize annotation).
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  pagesContainer.addEventListener('drop', async (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    const pageInfo = resolvePageFromTarget(e.target);
+    if (!pageInfo) return;
+    e.preventDefault();
+    if (!requireBackendFile()) return;
+    try {
+      const pending = await readImageFileAsPending(file);
+      const { x, y } = getPos(pageInfo, e);
+      state.pendingImage = pending;
+      addImageAnnotationAt(pageInfo, x, y);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
   // ================== UPLOAD ==================
   async function uploadFileInChunks(file, onProgress) {
     const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk — sequential, ~8 request untuk file 40MB
@@ -2965,7 +3063,7 @@
     const { name: exportName, password: exportPassword } = exportOpts;
 
     const textAnns  = state.annotations.filter((a) => a.type === 'text' && a.text.trim());
-    const sigAnns   = state.annotations.filter((a) => a.type === 'signature');
+    const sigAnns   = state.annotations.filter((a) => a.type === 'signature' || a.type === 'image');
     const newAnns   = state.annotations.filter((a) => ['highlight', 'shape', 'stickynote'].includes(a.type));
     const hasAny    = textAnns.length || sigAnns.length || newAnns.length;
 
@@ -3041,7 +3139,7 @@
       // ── 6. Reload viewer (hanya jika file berubah karena annotation dibakar) ──
       const parts = [];
       if (textAnns.length) parts.push(`${textAnns.length} teks`);
-      if (sigAnns.length)  parts.push(`${sigAnns.length} tanda tangan`);
+      if (sigAnns.length)  parts.push(`${sigAnns.length} tanda tangan/gambar`);
       if (newAnns.length)  parts.push(`${newAnns.length} annotation`);
       if (exportPassword)  parts.push('dilindungi password');
 
