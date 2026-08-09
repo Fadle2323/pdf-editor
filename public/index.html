@@ -352,7 +352,7 @@
 <button id="tool-insertimage" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Sisipkan gambar JPG/PNG -- pilih file lalu klik di halaman, atau drag &amp; drop langsung ke halaman">
 <span class="material-symbols-outlined text-[18px]">add_photo_alternate</span> Sisipkan Gambar
 </button>
-<input type="file" id="insert-image-file-input" accept="image/jpeg,image/png" style="display:none" />
+<input type="file" id="insert-image-file-input" accept="image/jpeg,image/png,.jpg,.jpeg,.png" style="display:none" />
 <div class="h-4 w-px bg-outline-variant"></div>
 <button id="tool-highlight" class="btn-disabled px-3 py-1.5 rounded-full text-label-sm flex items-center gap-1 hover:bg-surface-variant" title="Highlight teks (drag untuk membuat area highlight)">
 <span class="material-symbols-outlined text-[18px]">border_color</span> Highlight
@@ -2241,7 +2241,15 @@
   // ukuran aslinya (dipakai utk rasio aspek default box saat ditempatkan).
   function readImageFileAsPending(file) {
     return new Promise((resolve, reject) => {
-      if (!file || !/^image\/(jpeg|png)$/.test(file.type)) {
+      // Beberapa browser/OS/folder tersinkron-cloud kadang melaporkan
+      // file.type yang tidak persis 'image/jpeg'/'image/png' (kosong, atau
+      // varian non-standar spt 'image/jpg') -- jadi jangan HANYA andalkan
+      // MIME type, cek juga ekstensi file sbg fallback supaya file JPG/PNG
+      // yang valid tidak salah ditolak.
+      const nameLower = (file && file.name || '').toLowerCase();
+      const mimeOk = file && /^image\/(jpeg|jpg|png)$/.test(file.type);
+      const extOk = /\.(jpe?g|png)$/.test(nameLower);
+      if (!file || (!mimeOk && !extOk)) {
         reject(new Error('File harus berformat JPG atau PNG.'));
         return;
       }
@@ -2939,7 +2947,9 @@
       state.pendingImage = await readImageFileAsPending(file);
       state.activeTool = 'imageplace';
       setToolHint('Klik di halaman untuk menempatkan gambar.');
+      showToast('Gambar siap -- klik di halaman PDF untuk menempatkannya.', 'success');
     } catch (err) {
+      console.error('[insert-image] gagal baca file:', err);
       showToast(err.message, 'error');
     }
   });
@@ -2965,6 +2975,7 @@
       state.pendingImage = pending;
       addImageAnnotationAt(pageInfo, x, y);
     } catch (err) {
+      console.error('[insert-image] gagal baca file (drop):', err);
       showToast(err.message, 'error');
     }
   });
