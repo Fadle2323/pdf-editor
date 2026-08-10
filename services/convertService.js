@@ -372,7 +372,65 @@ function blocksToDocxParagraphs(blocks) {
  * tidak tersedia atau gagal (supaya convertToWord bisa fallback dgn aman --
  * ini BUKAN error fatal, cuma sinyal "coba jalur lain").
  */
-function tryPdf2docx(filePath, outputPath) {
+// Exit code 3 dari scripts/pdf_to_docx.py = pdf2docx spesifik tidak
+// ter-install (ImportError), beda dari exit code lain (gagal konversi,
+// binary python tidak ketemu, dst). Dipakai utk memicu self-heal di bawah.
+const PDF2DOCX_NOT_INSTALLED_EXIT_CODE = 3;
+
+// Self-heal runtime: DITEMUKAN lewat log produksi bahwa baik Dockerfile
+// MAUPUN npm postinstall (dua mekanisme standar utk install dependency saat
+// build) sama-sama TIDAK berjalan di platform hosting ini -- kemungkinan
+// besar platform-nya menjalankan 'npm install' dengan --ignore-scripts demi
+// keamanan (praktik umum di banyak platform managed hosting), yang membuat
+// postinstall TIDAK PERNAH terpicu apapun yang kita lakukan di sana. Karena
+// dua jalur "saat build" ini terbukti di luar kendali kita, install dicoba
+// lagi di RUNTIME sekali saja saat pertama kali dibutuhkan -- ini satu-
+// satunya titik yang PASTI kita kendalikan penuh, terlepas dari mekanisme
+// build/deploy platform apapun.
+let runtimePipInstallAttempted = false;
+
+function attemptRuntimePipInstall() {
+  return new Promise((resolve) => {
+    if (runtimePipInstallAttempted) { resolve(false); return; }
+    runtimePipInstallAttempted = true;
+
+    const requirementsPath = path.join(__dirname, '..', 'scripts', 'requirements.txt');
+    // Kombinasi yang sama dgn scripts/postinstall.js -- dicoba berurutan
+    // sampai salah satu berhasil.
+    const attempts = [
+      ['pip3', ['install', '--no-cache-dir', '--break-system-packages', '-r', requirementsPath]],
+      ['pip3', ['install', '--no-cache-dir', '-r', requirementsPath]],
+      ['pip', ['install', '--no-cache-dir', '--break-system-packages', '-r', requirementsPath]],
+      ['python3', ['-m', 'pip', 'install', '--no-cache-dir', '--break-system-packages', '-r', requirementsPath]],
+    ];
+
+    const tryNext = (i) => {
+      if (i >= attempts.length) {
+        console.warn('[convertToWord] Self-heal runtime pip install gagal di semua kombinasi -- tetap pakai fallback pdfjs-dist.');
+        resolve(false);
+        return;
+      }
+      const [bin, args] = attempts[i];
+      console.warn(`[convertToWord] Mencoba self-heal: install pdf2docx via "${bin}" saat runtime (percobaan ${i + 1}/${attempts.length})...`);
+      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => tryNext(i + 1));
+      proc.on('close', (code) => {
+        if (code === 0) {
+          console.warn(`[convertToWord] Self-heal berhasil via "${bin}". pdf2docx sekarang tersedia utk request berikutnya.`);
+          resolve(true);
+        } else {
+          console.warn(`[convertToWord] Self-heal via "${bin}" gagal (exit ${code}):`, stderr.trim().slice(-200));
+          tryNext(i + 1);
+        }
+      });
+    };
+    tryNext(0);
+  });
+}
+
+function tryPdf2docx(filePath, outputPath, allowSelfHealRetry = true) {
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, '..', 'scripts', 'pdf_to_docx.py');
     // Coba 'python3' dulu (standar di image Docker Linux), fallback ke
@@ -386,14 +444,27 @@ function tryPdf2docx(filePath, outputPath) {
       let stderr = '';
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('error', () => tryNext(i + 1)); // binary tidak ditemukan -> coba kandidat berikutnya
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
           resolve(outputPath);
-        } else {
-          console.warn(`[convertToWord] pdf2docx (${bin}) gagal (exit ${code}), fallback ke pdfjs-dist:`, stderr.trim().slice(-300));
-          try { fs.unlinkSync(outputPath); } catch (_) { /* mungkin belum sempat dibuat */ }
-          resolve(null);
+          return;
         }
+        try { fs.unlinkSync(outputPath); } catch (_) { /* mungkin belum sempat dibuat */ }
+
+        if (code === PDF2DOCX_NOT_INSTALLED_EXIT_CODE && allowSelfHealRetry) {
+          const healed = await attemptRuntimePipInstall();
+          if (healed) {
+            // Coba SEKALI lagi dari awal (allowSelfHealRetry=false spy tidak
+            // bisa infinite-loop kalau ternyata masih gagal setelah "berhasil"
+            // di-install -- misal krn alasan lain yg tak terduga).
+            const retryResult = await tryPdf2docx(filePath, outputPath, false);
+            resolve(retryResult);
+            return;
+          }
+        }
+
+        console.warn(`[convertToWord] pdf2docx (${bin}) gagal (exit ${code}), fallback ke pdfjs-dist:`, stderr.trim().slice(-300));
+        resolve(null);
       });
     };
     tryNext(0);
