@@ -395,6 +395,31 @@ function attemptRuntimePipInstall() {
     runtimePipInstallAttempted = true;
 
     const requirementsPath = path.join(__dirname, '..', 'scripts', 'requirements.txt');
+
+    // LANGKAH 0 -- bootstrap pip dulu kalau belum ada sama sekali. DITEMUKAN
+    // lewat log produksi: bukan cuma "pip tidak ada di PATH", tapi python3
+    // sendiri eksplisit bilang "No module named pip" -- pip BENAR-BENAR tidak
+    // ter-install di image ini (umum pada base image minimal yg sengaja
+    // membuang pip demi ukuran). ensurepip me-restore pip dari wheel yg
+    // dibundel LANGSUNG di dalam instalasi Python itu sendiri -- TIDAK butuh
+    // akses internet sama sekali. Diverifikasi bekerja di venv terisolasi
+    // tanpa pip sama sekali, mereplikasi persis kondisi produksi.
+    const runEnsurepip = () => new Promise((res) => {
+      console.warn('[convertToWord] pip tidak ditemukan -- coba bootstrap via "python3 -m ensurepip"...');
+      const proc = spawn('python3', ['-m', 'ensurepip', '--default-pip'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => res(false));
+      proc.on('close', (code) => {
+        if (code === 0) {
+          console.warn('[convertToWord] Bootstrap pip via ensurepip berhasil.');
+        } else {
+          console.warn('[convertToWord] Bootstrap pip via ensurepip gagal (exit', code, '):', stderr.trim().slice(-200));
+        }
+        res(code === 0);
+      });
+    });
+
     // Kombinasi yang sama dgn scripts/postinstall.js -- dicoba berurutan
     // sampai salah satu berhasil.
     const attempts = [
@@ -426,7 +451,8 @@ function attemptRuntimePipInstall() {
         }
       });
     };
-    tryNext(0);
+
+    runEnsurepip().then(() => tryNext(0));
   });
 }
 
