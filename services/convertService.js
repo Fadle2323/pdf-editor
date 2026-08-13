@@ -395,17 +395,39 @@ function attemptRuntimePipInstall() {
     runtimePipInstallAttempted = true;
 
     const requirementsPath = path.join(__dirname, '..', 'scripts', 'requirements.txt');
+    const vendoredPipWheel = path.join(__dirname, '..', 'scripts', 'vendor', 'pip-26.2.1-py3-none-any.whl');
 
-    // LANGKAH 0 -- bootstrap pip dulu kalau belum ada sama sekali. DITEMUKAN
-    // lewat log produksi: bukan cuma "pip tidak ada di PATH", tapi python3
-    // sendiri eksplisit bilang "No module named pip" -- pip BENAR-BENAR tidak
-    // ter-install di image ini (umum pada base image minimal yg sengaja
-    // membuang pip demi ukuran). ensurepip me-restore pip dari wheel yg
-    // dibundel LANGSUNG di dalam instalasi Python itu sendiri -- TIDAK butuh
-    // akses internet sama sekali. Diverifikasi bekerja di venv terisolasi
-    // tanpa pip sama sekali, mereplikasi persis kondisi produksi.
+    // METODE UTAMA -- jalankan wheel pip yang dibundel LANGSUNG di repo ini
+    // sbg zipapp (python3 bisa import & jalankan modul langsung dari file
+    // .whl, krn .whl cuma arsip zip biasa -- ini teknik yg SAMA PERSIS
+    // dipakai ensurepip secara internal). DITEMUKAN lewat 2 log produksi
+    // berturut-turut: environment ini tidak punya 'pip' ATAUPUN modul
+    // 'ensurepip' bawaan Python sama sekali (umum di python3 versi minimal
+    // Debian/Ubuntu yg sengaja pisahkan paket python3-venv/python3-pip).
+    // Metode ini TIDAK BUTUH keduanya -- cuma butuh python3 (yg sudah pasti
+    // ada, krn scripts/pdf_to_docx.py sendiri jalan pakai itu) & file wheel
+    // ini sendiri, TANPA akses internet utk bootstrap-nya (cuma utk
+    // download pdf2docx & dependency-nya sendiri, sama spt metode manapun).
+    const runVendoredWheel = () => new Promise((res) => {
+      if (!fs.existsSync(vendoredPipWheel)) { res(false); return; }
+      console.warn('[convertToWord] Mencoba self-heal via pip wheel yang dibundel di repo (tidak butuh pip/ensurepip sistem)...');
+      const proc = spawn('python3', [`${vendoredPipWheel}/pip`, 'install', '--no-cache-dir', '-r', requirementsPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => res(false));
+      proc.on('close', (code) => {
+        if (code === 0) {
+          console.warn('[convertToWord] Self-heal via vendored pip wheel BERHASIL. pdf2docx sekarang tersedia utk request berikutnya.');
+        } else {
+          console.warn('[convertToWord] Self-heal via vendored pip wheel gagal (exit', code, '):', stderr.trim().slice(-300));
+        }
+        res(code === 0);
+      });
+    });
+
+    // METODE CADANGAN 1 -- bootstrap pip sistem via ensurepip (kalau tersedia)
     const runEnsurepip = () => new Promise((res) => {
-      console.warn('[convertToWord] pip tidak ditemukan -- coba bootstrap via "python3 -m ensurepip"...');
+      console.warn('[convertToWord] Coba bootstrap pip sistem via "python3 -m ensurepip" (cadangan)...');
       const proc = spawn('python3', ['-m', 'ensurepip', '--default-pip'], { stdio: ['ignore', 'pipe', 'pipe'] });
       let stderr = '';
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -420,8 +442,7 @@ function attemptRuntimePipInstall() {
       });
     });
 
-    // Kombinasi yang sama dgn scripts/postinstall.js -- dicoba berurutan
-    // sampai salah satu berhasil.
+    // METODE CADANGAN 2 -- pip/pip3 sistem, kalau ternyata sudah terpasang
     const attempts = [
       ['pip3', ['install', '--no-cache-dir', '--break-system-packages', '-r', requirementsPath]],
       ['pip3', ['install', '--no-cache-dir', '-r', requirementsPath]],
@@ -452,7 +473,10 @@ function attemptRuntimePipInstall() {
       });
     };
 
-    runEnsurepip().then(() => tryNext(0));
+    runVendoredWheel().then((wheelOk) => {
+      if (wheelOk) { resolve(true); return; }
+      runEnsurepip().then(() => tryNext(0));
+    });
   });
 }
 
