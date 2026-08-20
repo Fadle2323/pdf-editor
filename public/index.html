@@ -109,8 +109,8 @@
         .annotation-box img { width: 100%; height: 100%; pointer-events: none; user-select: none; }
         .annotation-text-content { white-space: pre-wrap; padding: 2px 20px; }
 
-        #esign-modal, #split-modal, #export-name-modal, #watermark-modal, #blur-preview-modal { position: fixed; inset: 0; z-index: 110; background: rgba(27,28,26,0.45); display: none; align-items: center; justify-content: center; padding: 16px; }
-        #esign-modal.active, #split-modal.active, #export-name-modal.active, #watermark-modal.active, #blur-preview-modal.active { display: flex; }
+        #esign-modal, #split-modal, #export-name-modal, #watermark-modal, #blur-preview-modal, #ai-sensitive-modal, #ai-table-modal, #ai-summary-modal, #ai-audit-modal { position: fixed; inset: 0; z-index: 110; background: rgba(27,28,26,0.45); display: none; align-items: center; justify-content: center; padding: 16px; }
+        #esign-modal.active, #split-modal.active, #export-name-modal.active, #watermark-modal.active, #blur-preview-modal.active, #ai-sensitive-modal.active, #ai-table-modal.active, #ai-summary-modal.active, #ai-audit-modal.active { display: flex; }
         .highlight-ann { position: absolute; pointer-events: none; border-radius: 2px; }
         .highlight-ann-del { position: absolute; top: -10px; right: -10px; width: 18px; height: 18px; background: #ba1a1a; color: #fff; border-radius: 50%; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .15s; pointer-events: auto; z-index: 5; }
         .highlight-wrapper:hover .highlight-ann-del { opacity: 1; }
@@ -330,8 +330,11 @@
 <span class="material-symbols-outlined text-[16px]">checklist</span> Semua Halaman
 </button>
 <div class="h-4 w-px bg-outline-variant"></div>
-<button id="btn-auto-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#2b5742] hover:bg-[#e8f3ec]" title="Cari & tandai otomatis: NIK, No. Telepon, Email, Nominal Uang, Alamat, Tanggal Lahir, NPWP, Plat Nomor (tidak perlu aktifkan Deteksi Kata dulu)">
-<span class="material-symbols-outlined text-[16px]">privacy_tip</span> Deteksi Data Sensitif
+<button id="btn-auto-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#2b5742] hover:bg-[#e8f3ec]" title="Cari & tandai otomatis dengan Regex cepat: NIK, No. Telepon, Email, Nominal Uang, Alamat, Tanggal Lahir, NPWP, Plat Nomor">
+<span class="material-symbols-outlined text-[16px]">privacy_tip</span> Regex Cepat
+</button>
+<button id="btn-hybrid-ai-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#1e40af] hover:bg-[#dbeafe]" title="Pindai data sensitif lengkap dengan AI Gemini (nama tanpa label, alamat bebas, ID institusi, data rahasia)">
+<span class="material-symbols-outlined text-[16px]">psychology</span> Deteksi AI (Gemini)
 </button>
 <button id="btn-custom-patterns-toggle" class="btn-disabled px-2 py-1.5 rounded-full text-label-sm flex items-center text-[#2b5742] hover:bg-[#e8f3ec]" title="Atur pola data sensitif kustom">
 <span class="material-symbols-outlined text-[16px]">tune</span>
@@ -432,6 +435,9 @@
 <button id="btn-export-pdf" class="btn-disabled w-full mt-unit-2 py-2.5 px-3 bg-primary text-on-primary rounded-lg font-medium flex items-center justify-center gap-2 hover:opacity-90 transition-opacity font-label-sm min-w-0">
 <span class="material-symbols-outlined text-[18px] flex-shrink-0">export_notes</span> <span id="export-btn-label" class="truncate min-w-0">Export PDF</span>
 </button>
+<button id="btn-ai-summary" class="btn-disabled w-full mt-2 py-2 px-3 bg-surface-container-high border border-outline-variant hover:border-primary text-on-surface rounded-lg font-medium flex items-center justify-center gap-2 transition-colors font-label-sm min-w-0" title="Buat ringkasan 3-5 kalimat & poin penting dengan AI">
+  <span class="material-symbols-outlined text-[18px] text-primary">auto_stories</span> <span class="truncate">Ringkasan Dokumen (AI)</span>
+</button>
 <p class="font-label-sm text-on-surface-variant text-center mt-1">Teks & tanda tangan baru permanen setelah Export. Anda akan diminta memilih lokasi penyimpanan (di browser Chrome/Edge).</p>
 </div>
 
@@ -460,6 +466,9 @@
 <button id="btn-blur-selection" class="flex-shrink-0 bg-primary text-on-primary px-3 sm:px-4 py-2 rounded-lg font-label-sm hover:opacity-90 whitespace-nowrap">Blur</button>
 </div>
 <button id="btn-clear-selection" class="text-label-sm text-on-surface-variant hover:text-primary underline text-left break-words min-w-0">Batalkan semua pilihan</button>
+<button id="btn-view-audit-report" class="btn-disabled w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-surface-container-high hover:bg-primary-container text-on-surface rounded-lg text-label-sm transition-all mt-1" title="Lihat dan ekspor log kepatuhan data yang disensor">
+  <span class="material-symbols-outlined text-[16px] text-[#2b5742]">receipt_long</span> Laporan Audit Redaksi
+</button>
 </div>
 </div>
 
@@ -472,6 +481,12 @@
 <option value="txt">Plain Text (.txt)</option>
 </select>
 <button id="btn-convert" class="btn-disabled flex-shrink-0 bg-primary text-on-primary px-3 sm:px-unit-6 py-2 rounded-lg font-label-sm hover:opacity-90 whitespace-nowrap">Convert</button>
+</div>
+<div class="flex items-center justify-between mt-2 pt-2 border-t border-outline-variant/60">
+  <button id="btn-verify-tables" class="btn-disabled text-label-sm text-primary hover:underline flex items-center gap-1 font-medium" title="Periksa apakah ada kolom duplikat / anomali vMerge sebelum konversi">
+    <span class="material-symbols-outlined text-[16px]">table_chart_view</span> Verifikasi Tabel (AI)
+  </button>
+  <span class="text-[11px] text-on-surface-variant">Cek duplikasi/vMerge</span>
 </div>
 <p class="font-label-sm text-on-surface-variant mt-1">Butuh lapisan teks di PDF (bukan hasil scan tanpa OCR).</p>
 </div>
@@ -641,6 +656,131 @@
 </div>
 </div>
 
+
+<!-- AI Sensitive Data Review Modal -->
+<div id="ai-sensitive-modal">
+  <div class="bg-white rounded-xl p-4 sm:p-unit-6 pdf-page-shadow w-full max-w-[760px] max-h-[88vh] flex flex-col min-w-0">
+    <div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#1e40af] text-[24px]">psychology</span>
+        <div>
+          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Tinjau Temuan Data Sensitif (AI Gemini)</h3>
+          <p class="font-label-sm text-on-surface-variant">Periksa temuan AI sebelum ditandai untuk sensor permanen</p>
+        </div>
+      </div>
+      <button id="ai-sensitive-close" class="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div class="flex items-center justify-between py-2 text-label-sm">
+      <span id="ai-sensitive-summary" class="text-on-surface font-medium">0 temuan terdeteksi</span>
+      <div class="flex gap-2">
+        <button id="ai-sensitive-select-all" class="text-primary hover:underline text-xs">Pilih Semua</button>
+        <span class="text-outline-variant">|</span>
+        <button id="ai-sensitive-deselect-all" class="text-on-surface-variant hover:underline text-xs">Batalkan Semua</button>
+      </div>
+    </div>
+    <div id="ai-sensitive-list" class="flex-1 overflow-y-auto custom-scrollbar border border-outline-variant rounded-lg p-2 space-y-2 max-h-[50vh] bg-surface-container-lowest">
+      <!-- Cards rendered dynamically -->
+    </div>
+    <div class="flex justify-between items-center pt-3 border-t border-outline-variant mt-3">
+      <p class="text-[11px] text-on-surface-variant max-w-[60%]">Data yang dicentang akan otomatis ditandai di dokumen PDF untuk disensor (Blur).</p>
+      <div class="flex gap-2">
+        <button id="ai-sensitive-cancel" class="px-4 py-2 rounded-lg font-label-sm bg-surface-container-high">Batal</button>
+        <button id="ai-sensitive-confirm" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary font-medium flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px]">done_all</span> Tandai untuk Sensor
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Table Verification Modal -->
+<div id="ai-table-modal">
+  <div class="bg-white rounded-xl p-4 sm:p-unit-6 pdf-page-shadow w-full max-w-[620px] max-h-[85vh] flex flex-col min-w-0">
+    <div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-[24px]">table_chart_view</span>
+        <div>
+          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Hasil Verifikasi Struktur Tabel (AI)</h3>
+          <p class="font-label-sm text-on-surface-variant">Pemeriksaan integritas kolom, header, dan anomali vMerge</p>
+        </div>
+      </div>
+      <button id="ai-table-close" class="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div id="ai-table-content" class="flex-1 overflow-y-auto custom-scrollbar py-3 space-y-3">
+      <!-- Rendered dynamically -->
+    </div>
+    <div class="flex justify-end gap-2 pt-3 border-t border-outline-variant">
+      <button id="ai-table-close-btn" class="px-4 py-2 rounded-lg font-label-sm bg-surface-container-high">Tutup</button>
+      <button id="ai-table-proceed-btn" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary flex items-center gap-1 font-medium">
+        <span class="material-symbols-outlined text-[16px]">download</span> Lanjutkan Konversi
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- AI Summary Modal -->
+<div id="ai-summary-modal">
+  <div class="bg-white rounded-xl p-4 sm:p-unit-6 pdf-page-shadow w-full max-w-[640px] max-h-[85vh] flex flex-col min-w-0">
+    <div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-[24px]">auto_stories</span>
+        <div>
+          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Ringkasan Dokumen (AI)</h3>
+          <p class="font-label-sm text-on-surface-variant">Ikhtisar cerdas 3-5 kalimat dan poin penting</p>
+        </div>
+      </div>
+      <button id="ai-summary-close" class="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div id="ai-summary-content" class="flex-1 overflow-y-auto custom-scrollbar py-3 space-y-4">
+      <!-- Rendered dynamically -->
+    </div>
+    <div class="flex justify-between items-center pt-3 border-t border-outline-variant">
+      <button id="ai-summary-copy" class="px-3 py-1.5 rounded-lg text-label-sm border border-outline-variant hover:bg-surface-variant flex items-center gap-1.5 text-on-surface">
+        <span class="material-symbols-outlined text-[16px]">content_copy</span> Salin Ringkasan
+      </button>
+      <button id="ai-summary-dismiss" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary font-medium">Selesai</button>
+    </div>
+  </div>
+</div>
+
+<!-- Redaction Audit Trail Modal -->
+<div id="ai-audit-modal">
+  <div class="bg-white rounded-xl p-4 sm:p-unit-6 pdf-page-shadow w-full max-w-[660px] max-h-[85vh] flex flex-col min-w-0">
+    <div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#2b5742] text-[24px]">verified_user</span>
+        <div>
+          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Laporan Audit Redaksi Data Sensitif</h3>
+          <p class="font-label-sm text-on-surface-variant">Dokumentasi kepatuhan privasi (Compliance Audit Log)</p>
+        </div>
+      </div>
+      <button id="ai-audit-close" class="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div id="ai-audit-content" class="flex-1 overflow-y-auto custom-scrollbar py-3 space-y-3 font-mono text-xs">
+      <!-- Rendered dynamically -->
+    </div>
+    <div class="flex justify-between items-center pt-3 border-t border-outline-variant">
+      <div class="flex gap-2">
+        <button id="ai-audit-copy" class="px-3 py-1.5 rounded-lg text-label-sm border border-outline-variant hover:bg-surface-variant flex items-center gap-1 text-on-surface">
+          <span class="material-symbols-outlined text-[16px]">content_copy</span> Salin Teks
+        </button>
+        <button id="ai-audit-download" class="px-3 py-1.5 rounded-lg text-label-sm border border-outline-variant hover:bg-surface-variant flex items-center gap-1 text-on-surface">
+          <span class="material-symbols-outlined text-[16px]">download</span> Unduh .TXT
+        </button>
+      </div>
+      <button id="ai-audit-done" class="px-4 py-2 rounded-lg font-label-sm bg-primary text-on-primary font-medium">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <!-- Blur Preview Modal -->
 <div id="blur-preview-modal">
 <div class="bg-white rounded-xl p-unit-6 pdf-page-shadow w-full max-w-[720px] max-h-[85vh] flex flex-col">
@@ -729,6 +869,7 @@
 
   // ================== STATE ==================
   const state = {
+    auditHistory: [],
     originalName: null,
     fileSize: 0,
     history: [],
@@ -785,7 +926,7 @@
   function setBackendEditControlsEnabled(v) {
     ['btn-convert', 'btn-split', 'btn-compress', 'btn-export-pdf', 'tool-esign', 'tool-insertimage',
       'btn-strip-metadata', 'btn-watermark', 'tool-highlight', 'tool-shape', 'tool-stickynote',
-      'btn-open-find'].forEach((id) => setEnabled(id, v));
+      'btn-open-find', 'btn-hybrid-ai-redact', 'btn-ai-summary', 'btn-verify-tables', 'ai-chat-send'].forEach((id) => setEnabled(id, v));
   }
   function requireBackendFile() {
     if (currentFilename()) return true;
@@ -2842,6 +2983,16 @@
       });
       const data = await apiFetch('/apply-patches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: currentFilename(), patches }) });
       pushHistory(data.filename, `Blur diterapkan: ${document.getElementById('blur-style').selectedOptions[0].textContent} (${patches.length} area)`);
+      // Record audit history for compliance report
+      state.selectedAreas.forEach((a) => {
+        state.auditHistory.push({
+          category: a.category || (a.wordIndex !== undefined ? 'Kata Terpilih' : 'Area Snip Manual'),
+          method: a.method || (a.wordIndex !== undefined ? 'Klik Kata' : 'Snip Manual'),
+          text: a.text || '***',
+          timestamp: new Date().toISOString()
+        });
+      });
+      setEnabled('btn-view-audit-report', true);
       await loadPdfFromServer(data.filename);
       const modeLabel = snipMode === 'area' ? 'area penuh' : 'dipecah per-kata jika perlu';
       showToast(`${patches.length} area berhasil di-blur (${modeLabel}).`, 'success');
@@ -4224,7 +4375,628 @@
     };
   })();
 
+
+  // ================== AI INTEGRATION (GEMINI FLASH) ==================
+  async function getDocumentTextForAI() {
+    if (!state.pages || !state.pages.length) return '';
+    await ensureWordBoxesForAllPages();
+    const pageTexts = [];
+    state.pages.forEach((pageInfo) => {
+      const lines = groupWordBoxesIntoLines(pageInfo.wordBoxes);
+      const text = lines.map((l) => l.text).join('\n');
+      if (text.trim()) {
+        pageTexts.push(`[Halaman ${pageInfo.pageNum}]\n${text}`);
+      }
+    });
+    return pageTexts.join('\n\n');
+  }
+
+  // Sidebar Tab Switcher
+  const asideTabTools = document.getElementById('aside-tab-tools');
+  const asideTabChat = document.getElementById('aside-tab-chat');
+  const asidePanelTools = document.getElementById('aside-panel-tools');
+  const asidePanelChat = document.getElementById('aside-panel-chat');
+
+  if (asideTabTools && asideTabChat) {
+    asideTabTools.addEventListener('click', () => {
+      asideTabTools.className = 'flex-1 py-1.5 px-2 rounded-lg font-label-sm font-medium transition-colors bg-primary text-white flex items-center justify-center gap-1.5';
+      asideTabChat.className = 'flex-1 py-1.5 px-2 rounded-lg font-label-sm font-medium transition-colors text-on-surface-variant hover:bg-surface-variant flex items-center justify-center gap-1.5';
+      asidePanelTools.classList.remove('hidden');
+      asidePanelTools.classList.add('flex');
+      asidePanelChat.classList.add('hidden');
+      asidePanelChat.classList.remove('flex');
+    });
+
+    asideTabChat.addEventListener('click', () => {
+      asideTabChat.className = 'flex-1 py-1.5 px-2 rounded-lg font-label-sm font-medium transition-colors bg-primary text-white flex items-center justify-center gap-1.5';
+      asideTabTools.className = 'flex-1 py-1.5 px-2 rounded-lg font-label-sm font-medium transition-colors text-on-surface-variant hover:bg-surface-variant flex items-center justify-center gap-1.5';
+      asidePanelChat.classList.remove('hidden');
+      asidePanelChat.classList.add('flex');
+      asidePanelTools.classList.add('hidden');
+      asidePanelTools.classList.remove('flex');
+    });
+  }
+
+  // Feature 1: Hybrid Regex + LLM Sensitive Data Detection
+  document.getElementById('btn-hybrid-ai-redact')?.addEventListener('click', async () => {
+    if (!state.pages.length) return;
+    setLoading(true);
+    try {
+      await ensureWordBoxesForAllPages();
+      const docText = await getDocumentTextForAI();
+      if (!docText.trim()) {
+        return showToast('Tidak ada teks terbaca di dokumen ini.', 'warning');
+      }
+
+      // 1st Pass: Regex Scanning
+      const regexFindings = [];
+      const allPatterns = { ...SENSITIVE_PATTERNS };
+      state.customPatterns.forEach((cp) => {
+        allPatterns['custom:' + cp.id] = new RegExp(cp.regex.source, cp.regex.flags);
+      });
+
+      state.pages.forEach((pageInfo) => {
+        const pageIdx = pageInfo.pageNum - 1;
+        const lines = groupWordBoxesIntoLines(pageInfo.wordBoxes);
+        lines.forEach((line) => {
+          Object.entries(allPatterns).forEach(([key, pattern]) => {
+            pattern.lastIndex = 0;
+            let m;
+            while ((m = pattern.exec(line.text)) !== null) {
+              let matchText = m[0];
+              let matchStart = m.index;
+              let matchEnd = matchStart + m[0].length;
+              if (m.indices && m.indices.groups) {
+                const grp = m.indices.groups.nameValue || m.indices.groups.proseNameValue;
+                if (grp) {
+                  [matchStart, matchEnd] = grp;
+                  matchText = line.text.substring(matchStart, matchEnd);
+                }
+              }
+              if (matchText.trim()) {
+                const catLabel = SENSITIVE_LABELS[key] || key;
+                if (!regexFindings.some((rf) => rf.text.toLowerCase() === matchText.trim().toLowerCase())) {
+                  regexFindings.push({
+                    text: matchText.trim(),
+                    category: catLabel,
+                    reason: `Format baku sesuai pola ${catLabel}`,
+                    confidence: 'high',
+                    method: 'Regex',
+                    page: pageIdx,
+                  });
+                }
+              }
+              if (m[0].length === 0) pattern.lastIndex += 1;
+            }
+          });
+        });
+      });
+
+      // 2nd Pass: AI Deep Scan (Gemini)
+      let aiFindings = [];
+      try {
+        const res = await apiFetch('/ai/detect-sensitive', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: docText, filename: currentFilename() }),
+        });
+        const rawFindings = res.findings || (res.data && res.data.findings) || [];
+        aiFindings = rawFindings.map((f) => ({
+          ...f,
+          method: 'AI Gemini',
+        }));
+      } catch (e) {
+        console.warn('AI detect fallback:', e);
+        showToast('Peringatan: Deteksi AI mengalami kendala, menggunakan hasil Regex.', 'info');
+      }
+
+      // Merge & filter duplicates
+      const merged = [...regexFindings];
+      aiFindings.forEach((af) => {
+        if (!merged.some((m) => m.text.toLowerCase() === af.text.toLowerCase())) {
+          merged.push(af);
+        }
+      });
+
+      if (!merged.length) {
+        return showToast('Tidak ditemukan data sensitif pada dokumen ini.', 'info');
+      }
+
+      showAiSensitiveReviewModal(merged);
+    } catch (err) {
+      reportUnexpectedError(err, 'Gagal menjalankan deteksi data sensitif.');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  function showAiSensitiveReviewModal(findings) {
+    const modal = document.getElementById('ai-sensitive-modal');
+    const listEl = document.getElementById('ai-sensitive-list');
+    const summaryEl = document.getElementById('ai-sensitive-summary');
+    const selectAllBtn = document.getElementById('ai-sensitive-select-all');
+    const deselectAllBtn = document.getElementById('ai-sensitive-deselect-all');
+    const confirmBtn = document.getElementById('ai-sensitive-confirm');
+    const cancelBtn = document.getElementById('ai-sensitive-cancel');
+    const closeBtn = document.getElementById('ai-sensitive-close');
+
+    listEl.innerHTML = '';
+    summaryEl.textContent = `${findings.length} data sensitif terdeteksi (Regex + AI Gemini)`;
+
+    findings.forEach((item, idx) => {
+      const isAi = item.method === 'AI Gemini';
+      const card = document.createElement('div');
+      card.className = `p-2.5 rounded-lg border ${isAi ? 'border-[#bfdbfe] bg-[#f0f7ff]' : 'border-outline-variant bg-surface'} flex items-start gap-2.5`;
+      card.innerHTML = `
+        <input type="checkbox" id="ai-item-check-${idx}" class="ai-finding-check mt-1 rounded cursor-pointer accent-primary" checked data-idx="${idx}">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-1">
+            <span class="text-[11px] font-semibold px-2 py-0.5 rounded ${isAi ? 'bg-[#1e40af] text-white' : 'bg-[#2b5742] text-white'}">${escapeHtml(item.category || 'Data Sensitif')}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-mono ${isAi ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}">${escapeHtml(item.method)}</span>
+            ${item.confidence === 'high' ? '<span class="text-[10px] text-green-700 bg-green-50 px-1 rounded font-medium">Akurasi Tinggi</span>' : ''}
+          </div>
+          <p class="font-mono text-xs font-bold text-on-surface bg-white/80 px-2 py-1 rounded border border-outline-variant/40 mb-1 select-all break-all">${escapeHtml(item.text)}</p>
+          <p class="text-[11px] text-on-surface-variant italic leading-tight">${escapeHtml(item.reason || 'Terdeteksi sebagai data pribadi')}</p>
+        </div>
+      `;
+      listEl.appendChild(card);
+    });
+
+    function closeModal() { modal.classList.remove('active'); }
+
+    selectAllBtn.onclick = () => {
+      listEl.querySelectorAll('.ai-finding-check').forEach((cb) => { cb.checked = true; });
+    };
+    deselectAllBtn.onclick = () => {
+      listEl.querySelectorAll('.ai-finding-check').forEach((cb) => { cb.checked = false; });
+    };
+    closeBtn.onclick = closeModal;
+    cancelBtn.onclick = closeModal;
+
+    confirmBtn.onclick = () => {
+      const checkedIndices = Array.from(listEl.querySelectorAll('.ai-finding-check:checked')).map((cb) => parseInt(cb.getAttribute('data-idx'), 10));
+      if (!checkedIndices.length) {
+        showToast('Pilih setidaknya satu item untuk disensor.', 'warning');
+        return;
+      }
+
+      let addedCount = 0;
+      checkedIndices.forEach((idx) => {
+        const item = findings[idx];
+        const targetText = item.text.trim().toLowerCase();
+        if (!targetText) return;
+
+        state.pages.forEach((pageInfo) => {
+          const pageIdx = pageInfo.pageNum - 1;
+          const lines = groupWordBoxesIntoLines(pageInfo.wordBoxes);
+          lines.forEach((line) => {
+            const lineLower = line.text.toLowerCase();
+            let pos = 0;
+            while ((pos = lineLower.indexOf(targetText, pos)) !== -1) {
+              const matchStart = pos;
+              const matchEnd = pos + targetText.length;
+              line.offsets.forEach((o) => {
+                const overlaps = !(o.end <= matchStart || o.start >= matchEnd);
+                if (!overlaps) return;
+                const wb = o.wb;
+                if (state.selectedAreas.some((a) => a.wordIndex === wb.index && a.page === pageIdx)) return;
+                state.selectedAreas.push({
+                  id: 'w' + pageInfo.pageNum + '-' + wb.index,
+                  page: pageIdx,
+                  wordIndex: wb.index,
+                  x: wb.x,
+                  y: wb.y,
+                  width: wb.width,
+                  height: wb.height,
+                  category: item.category,
+                  method: item.method,
+                  text: wb.text,
+                });
+                addedCount += 1;
+              });
+              pos += targetText.length || 1;
+            }
+          });
+        });
+      });
+
+      closeModal();
+      renderAllOverlays();
+      updateSelectionPanel();
+      setEnabled('btn-view-audit-report', true);
+      showToast(`${addedCount} kata data sensitif berhasil ditandai. Pilih gaya sensor di panel kanan lalu klik Blur.`, 'success');
+    };
+
+    modal.classList.add('active');
+  }
+
+  // Feature 2: Table Verification
+  document.getElementById('btn-verify-tables')?.addEventListener('click', async () => {
+    if (!state.pages.length) return;
+    const format = document.getElementById('convert-format').value;
+    setLoading(true);
+    try {
+      const docText = await getDocumentTextForAI();
+      const res = await apiFetch('/ai/verify-tables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: docText, filename: currentFilename(), docType: format === 'excel' ? 'Excel (.xlsx)' : 'Word (.docx)' }),
+      });
+
+      const reportData = res.data || res;
+      showTableVerificationModal(reportData, format);
+    } catch (err) {
+      reportUnexpectedError(err, 'Gagal memverifikasi tabel.');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  function showTableVerificationModal(data, format) {
+    const modal = document.getElementById('ai-table-modal');
+    const content = document.getElementById('ai-table-content');
+    const closeBtn = document.getElementById('ai-table-close');
+    const closeBtn2 = document.getElementById('ai-table-close-btn');
+    const proceedBtn = document.getElementById('ai-table-proceed-btn');
+
+    const score = data.score || 85;
+    const status = data.status || 'Normal';
+    const findings = Array.isArray(data.findings) ? data.findings : [];
+    const rec = data.recommendation || 'Struktur tabel siap dikonversi';
+    const tableCount = data.tableCountDetected || 1;
+
+    const scoreColor = score >= 80 ? 'text-green-600' : score >= 60 ? 'text-amber-600' : 'text-red-600';
+    const bgBadge = score >= 80 ? 'bg-green-100 text-green-800' : score >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800';
+
+    content.innerHTML = `
+      <div class="flex items-center justify-between p-3 bg-surface-container-high rounded-xl border border-outline-variant/60">
+        <div>
+          <p class="text-xs text-on-surface-variant font-medium">Skor Integritas Tabel</p>
+          <div class="flex items-baseline gap-2 mt-0.5">
+            <span class="text-2xl font-black ${scoreColor}">${score}<span class="text-xs font-normal text-on-surface-variant">/100</span></span>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${bgBadge}">${escapeHtml(status)}</span>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-xs text-on-surface-variant">Estimasi Tabel</span>
+          <p class="text-sm font-bold text-on-surface">${tableCount} tabel terdeteksi</p>
+        </div>
+      </div>
+
+      <div class="space-y-1.5">
+        <h4 class="text-xs font-bold text-on-surface uppercase tracking-wider">Hasil Pemeriksaan Anomali</h4>
+        <div class="bg-surface-container-lowest p-3 rounded-lg border border-outline-variant/60 space-y-1.5">
+          ${findings.map((f) => `
+            <div class="flex items-start gap-2 text-xs text-on-surface">
+              <span class="material-symbols-outlined text-[16px] text-primary flex-shrink-0 mt-0.5">check_circle</span>
+              <span>${escapeHtml(f)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="p-3 bg-primary-container/20 rounded-lg border border-primary/40">
+        <h4 class="text-xs font-bold text-on-primary-container flex items-center gap-1 mb-1">
+          <span class="material-symbols-outlined text-[16px]">info</span> Rekomendasi AI
+        </h4>
+        <p class="text-xs text-on-surface leading-relaxed">${escapeHtml(rec)}</p>
+      </div>
+    `;
+
+    function closeModal() { modal.classList.remove('active'); }
+    closeBtn.onclick = closeModal;
+    closeBtn2.onclick = closeModal;
+
+    proceedBtn.onclick = () => {
+      closeModal();
+      document.getElementById('btn-convert').click();
+    };
+
+    modal.classList.add('active');
+  }
+
+  // Feature 3: Document Summary (Ringkasan Otomatis)
+  document.getElementById('btn-ai-summary')?.addEventListener('click', async () => {
+    if (!state.pages.length) return;
+    setLoading(true);
+    try {
+      const docText = await getDocumentTextForAI();
+      const res = await apiFetch('/ai/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: docText, filename: currentFilename() }),
+      });
+
+      const summaryData = res.data || res;
+      showDocumentSummaryModal(summaryData);
+    } catch (err) {
+      reportUnexpectedError(err, 'Gagal membuat ringkasan dokumen.');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  function showDocumentSummaryModal(data) {
+    const modal = document.getElementById('ai-summary-modal');
+    const content = document.getElementById('ai-summary-content');
+    const copyBtn = document.getElementById('ai-summary-copy');
+    const dismissBtn = document.getElementById('ai-summary-dismiss');
+    const closeBtn = document.getElementById('ai-summary-close');
+
+    const docType = data.docType || 'Dokumen Umum';
+    const summary = data.summary || 'Tidak ada ringkasan yang dihasilkan.';
+    const highlights = Array.isArray(data.keyHighlights) ? data.keyHighlights : [];
+    const dates = Array.isArray(data.importantDatesOrDeadlines) ? data.importantDatesOrDeadlines : [];
+
+    content.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-semibold px-2.5 py-1 bg-primary text-white rounded-md">${escapeHtml(docType)}</span>
+        <span class="text-xs text-on-surface-variant font-medium">${state.pages.length} Halaman</span>
+      </div>
+
+      <div class="p-3.5 bg-surface-container-high rounded-xl border border-outline-variant/60">
+        <h4 class="text-xs font-bold text-on-surface uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px] text-primary">subject</span> Ringkasan Eksekutif (3-5 Kalimat)
+        </h4>
+        <p class="text-xs text-on-surface leading-relaxed whitespace-pre-line">${escapeHtml(summary)}</p>
+      </div>
+
+      <div class="space-y-1.5">
+        <h4 class="text-xs font-bold text-on-surface uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px] text-primary">label_important</span> Poin-Poin Utama
+        </h4>
+        <div class="bg-surface-container-lowest p-3 rounded-lg border border-outline-variant/60 space-y-1.5">
+          ${highlights.map((h) => `
+            <div class="flex items-start gap-2 text-xs text-on-surface">
+              <span class="material-symbols-outlined text-[16px] text-primary flex-shrink-0 mt-0.5">check</span>
+              <span>${escapeHtml(h)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      ${dates.length ? `
+        <div class="p-3 bg-amber-50 rounded-lg border border-amber-200">
+          <h4 class="text-xs font-bold text-amber-900 flex items-center gap-1 mb-1">
+            <span class="material-symbols-outlined text-[16px]">event</span> Tanggal Penting & Batas Waktu
+          </h4>
+          <ul class="list-disc list-inside text-xs text-amber-950 space-y-0.5">
+            ${dates.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+    `;
+
+    function closeModal() { modal.classList.remove('active'); }
+    closeBtn.onclick = closeModal;
+    dismissBtn.onclick = closeModal;
+
+    copyBtn.onclick = () => {
+      const fullSummaryText = `[RINGKASAN DOKUMEN: ${state.originalName || 'Dokumen'}]\nTipe: ${docType}\n\n${summary}\n\nPoin Utama:\n${highlights.map((h) => `- ${h}`).join('\n')}\n\nTanggal Penting:\n${dates.map((d) => `- ${d}`).join('\n')}`;
+      navigator.clipboard.writeText(fullSummaryText);
+      showToast('Ringkasan berhasil disalin ke clipboard.', 'success');
+    };
+
+    modal.classList.add('active');
+  }
+
+  // Feature 4: Redaction Audit Report
+  document.getElementById('btn-view-audit-report')?.addEventListener('click', async () => {
+    showRedactionAuditReport();
+  });
+
+  async function showRedactionAuditReport(customAuditData) {
+    setLoading(true);
+    try {
+      let redactionList = [];
+      if (customAuditData) {
+        redactionList = customAuditData;
+      } else if (state.auditHistory && state.auditHistory.length) {
+        redactionList = state.auditHistory;
+      } else if (state.selectedAreas.length) {
+        redactionList = state.selectedAreas.map((a) => ({
+          category: a.category || (a.wordIndex !== undefined ? 'Kata Terpilih' : 'Area Snip Manual'),
+          method: a.method || (a.wordIndex !== undefined ? 'Klik Manual' : 'Snip Manual'),
+          text: a.text || '***',
+        }));
+      }
+
+      const res = await apiFetch('/ai/audit-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: state.originalName || currentFilename() || 'Dokumen PDF',
+          redactionList,
+          blurStyle: document.getElementById('blur-style')?.value || 'normal',
+          pageCount: state.pages.length || 1,
+        }),
+      });
+
+      const report = res.data || res;
+      openAuditModal(report);
+    } catch (err) {
+      reportUnexpectedError(err, 'Gagal membuat laporan audit redaksi.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openAuditModal(report) {
+    const modal = document.getElementById('ai-audit-modal');
+    const content = document.getElementById('ai-audit-content');
+    const closeBtn = document.getElementById('ai-audit-close');
+    const doneBtn = document.getElementById('ai-audit-done');
+    const copyBtn = document.getElementById('ai-audit-copy');
+    const downloadBtn = document.getElementById('ai-audit-download');
+
+    const catRows = Object.entries(report.categories || {}).map(([k, v]) => `  • ${k.padEnd(24)}: ${v} entitas`).join('\n');
+    const methRows = Object.entries(report.methods || {}).map(([k, v]) => `  • ${k.padEnd(24)}: ${v} entitas`).join('\n');
+
+    const reportRawText = `===============================================================
+               LAPORAN AUDIT REDAKSI DATA SENSITIF
+             (Sensitive Data Redaction Compliance Log)
+===============================================================
+ID Laporan      : ${report.reportId}
+Nama File       : ${report.filename}
+Waktu Pembuatan : ${report.generatedAt}
+Status Redaksi  : ${report.complianceStatus}
+Gaya Sensor     : ${report.blurStyle}
+Jumlah Halaman  : ${report.pageCount}
+Total Entitas   : ${report.totalRedactions}
+
+---------------------------------------------------------------
+RINCIAN KATEGORI DATA DISENSOR:
+---------------------------------------------------------------
+${catRows || '  (Tidak ada kategori tercatat)'}
+
+---------------------------------------------------------------
+RINCIAN METODE DETEKSI:
+---------------------------------------------------------------
+${methRows || '  (Manual)'}
+
+---------------------------------------------------------------
+RINGKASAN AUDIT:
+${report.summary}
+===============================================================
+Diterbitkan oleh: Scripta PDF Workspace Audit Engine
+`;
+
+    content.innerHTML = `
+      <pre class="bg-surface-container-lowest p-3.5 rounded-lg border border-outline-variant/60 overflow-x-auto whitespace-pre leading-relaxed text-on-surface select-all font-mono text-xs">${escapeHtml(reportRawText)}</pre>
+    `;
+
+    function closeModal() { modal.classList.remove('active'); }
+    closeBtn.onclick = closeModal;
+    doneBtn.onclick = closeModal;
+
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(reportRawText);
+      showToast('Laporan audit berhasil disalin.', 'success');
+    };
+
+    downloadBtn.onclick = () => {
+      const blob = new Blob([reportRawText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit_report_${report.reportId}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Laporan audit berhasil diunduh.', 'success');
+    };
+
+    modal.classList.add('active');
+  }
+
+  // Feature 5: Ask PDF AI Chat
+  const aiChatInput = document.getElementById('ai-chat-input');
+  const aiChatSend = document.getElementById('ai-chat-send');
+  const aiChatMessages = document.getElementById('ai-chat-messages');
+  const btnClearChat = document.getElementById('btn-clear-chat');
+  const chatEmptyHint = document.getElementById('chat-empty-hint');
+  let chatHistory = [];
+
+  function renderChatBubble(role, text) {
+    if (chatEmptyHint) chatEmptyHint.style.display = 'none';
+    const isUser = role === 'user';
+    const wrap = document.createElement('div');
+    wrap.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-full`;
+
+    const bubble = document.createElement('div');
+    bubble.className = `p-2.5 rounded-xl text-xs max-w-[90%] leading-relaxed ${
+      isUser
+        ? 'bg-primary text-white rounded-br-none shadow-sm'
+        : 'bg-surface-container-high text-on-surface border border-outline-variant/50 rounded-bl-none shadow-sm'
+    }`;
+
+    if (isUser) {
+      bubble.textContent = text;
+    } else {
+      let formatted = escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n\s*•\s*(.*?)/g, '<br/>• $1')
+        .replace(/\n\s*-\s*(.*?)/g, '<br/>• $1')
+        .replace(/\n/g, '<br/>');
+      bubble.innerHTML = formatted;
+    }
+
+    wrap.appendChild(bubble);
+    aiChatMessages.appendChild(wrap);
+    aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+  }
+
+  async function sendAiChatMessage(userMessage) {
+    const q = (userMessage || aiChatInput?.value || '').trim();
+    if (!q) return;
+    if (!state.pages.length) {
+      return showToast('Silakan upload PDF terlebih dahulu.', 'warning');
+    }
+
+    if (aiChatInput) aiChatInput.value = '';
+    renderChatBubble('user', q);
+    chatHistory.push({ role: 'user', content: q });
+
+    // Typing indicator
+    const typingWrap = document.createElement('div');
+    typingWrap.className = 'flex items-start max-w-full';
+    typingWrap.id = 'chat-typing-indicator';
+    typingWrap.innerHTML = `
+      <div class="p-2 bg-surface-container-high rounded-xl text-xs text-on-surface-variant flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+        <span>Gemini sedang membaca dokumen...</span>
+      </div>
+    `;
+    aiChatMessages.appendChild(typingWrap);
+    aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+
+    try {
+      const docText = await getDocumentTextForAI();
+      const res = await apiFetch('/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          history: chatHistory.slice(-6),
+          text: docText,
+          filename: currentFilename(),
+        }),
+      });
+
+      document.getElementById('chat-typing-indicator')?.remove();
+      const answer = res.answer || (res.data && res.data.answer) || 'Tidak dapat memproses jawaban.';
+      renderChatBubble('assistant', answer);
+      chatHistory.push({ role: 'assistant', content: answer });
+    } catch (err) {
+      document.getElementById('chat-typing-indicator')?.remove();
+      renderChatBubble('assistant', '⚠️ Gagal mendapatkan jawaban: ' + (err.message || 'Coba lagi.'));
+    }
+  }
+
+  aiChatSend?.addEventListener('click', () => sendAiChatMessage());
+  aiChatInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendAiChatMessage();
+    }
+  });
+
+  btnClearChat?.addEventListener('click', () => {
+    chatHistory = [];
+    aiChatMessages.innerHTML = '';
+    if (chatEmptyHint) chatEmptyHint.style.display = 'block';
+    showToast('Riwayat chat dibersihkan.', 'info');
+  });
+
+  document.querySelectorAll('.chat-prompt-chip').forEach((chip) => {
+    chip.addEventListener('click', function () {
+      const prompt = this.getAttribute('data-prompt');
+      if (prompt) sendAiChatMessage(prompt);
+    });
+  });
+
   // ================== INIT ==================
+
   checkBackendHealth();
 })();
 </script>

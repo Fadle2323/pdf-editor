@@ -6,6 +6,7 @@ router.use('/', require('./textRoutes'));
 router.use('/', require('./pdfRoutes'));
 router.use('/', require('./convertRoutes'));
 router.use('/', require('./fileRoutes'));
+router.use('/', require('./aiRoutes'));
 
 // GET /api/health - endpoint sederhana untuk cek status server
 router.get('/health', (req, res) => {
