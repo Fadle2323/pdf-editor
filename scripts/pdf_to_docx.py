@@ -384,6 +384,135 @@ def fix_duplicated_table_columns(docx_path):
     return fixed_columns
 
 
+def fix_hyperlinks_and_styles(docx_path):
+    """Memperbaiki bug spesifik pdf2docx pada struktur OpenXML hyperlink
+    dan memastikan semua hyperlink (eksternal & internal) aktif dan tampil
+    konsisten (warna biru #0563C1 dan garis bawah) di Microsoft Word, Word Online,
+    LibreOffice, dan Google Docs.
+
+    Root cause bug pdf2docx:
+    1. pdf2docx menempatkan elemen <w:hyperlink> DI DALAM <w:r>
+       (<w:r><w:hyperlink>...</w:hyperlink></w:r>). Menurut spesifikasi
+       OpenXML (ECMA-376 / ISO 29500), <w:hyperlink> harus berada langsung
+       di bawah paragraf <w:p> sebagai sibling dari <w:r>. Penempatan ilegal
+       di dalam <w:r> menyebabkan Microsoft Word dan viewer dokumen lainnya
+       mengabaikan / menonaktifkan hyperlink tersebut.
+    2. Dokumen template pdf2docx tidak mendefinisikan Character Style 'Hyperlink',
+       sehingga Word tidak memberikan gaya visual tautan secara default.
+
+    Fix:
+    1. Daftarkan Character Style 'Hyperlink' (warna biru #0563C1, underline single)
+       jika belum ada di Document.styles.
+    2. Angkat (lift) semua <w:hyperlink> yang terkurung di dalam <w:r> menjadi
+       child langsung dari <w:p>.
+    3. Terapkan rStyle 'Hyperlink' dan formatting eksplisit (color #0563C1,
+       u single) pada seluruh run di dalam semua <w:hyperlink>."""
+    import copy  # pylint: disable=import-outside-toplevel
+    import docx  # pylint: disable=import-outside-toplevel
+    from docx.enum.style import WD_STYLE_TYPE  # pylint: disable=import-outside-toplevel
+    from docx.oxml import OxmlElement  # pylint: disable=import-outside-toplevel
+    from docx.oxml.ns import qn  # pylint: disable=import-outside-toplevel
+    from docx.shared import RGBColor  # pylint: disable=import-outside-toplevel
+
+    document = docx.Document(docx_path)
+
+    if 'Hyperlink' not in document.styles:
+        try:
+            h_style = document.styles.add_style('Hyperlink', WD_STYLE_TYPE.CHARACTER)
+            h_style.font.color.rgb = RGBColor(5, 99, 193)
+            h_style.font.underline = True
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    def style_hyperlink_run(inner_r, ref_rpr=None):
+        inner_rpr = inner_r.find(qn('w:rPr'))
+        if inner_rpr is None:
+            if ref_rpr is not None:
+                inner_r.insert(0, copy.deepcopy(ref_rpr))
+                inner_rpr = inner_r.find(qn('w:rPr'))
+            else:
+                inner_rpr = OxmlElement('w:rPr')
+                inner_r.insert(0, inner_rpr)
+        if inner_rpr is not None:
+            if inner_rpr.find(qn('w:rStyle')) is None:
+                rstyle = OxmlElement('w:rStyle')
+                rstyle.set(qn('w:val'), 'Hyperlink')
+                inner_rpr.insert(0, rstyle)
+            if inner_rpr.find(qn('w:color')) is None:
+                color = OxmlElement('w:color')
+                color.set(qn('w:val'), '0563C1')
+                inner_rpr.append(color)
+            if inner_rpr.find(qn('w:u')) is None:
+                u = OxmlElement('w:u')
+                u.set(qn('w:val'), 'single')
+                inner_rpr.append(u)
+
+    all_paragraphs = list(document.paragraphs)
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                all_paragraphs.extend(cell.paragraphs)
+
+    fixed_nested = 0
+    total_hyperlinks = 0
+
+    for paragraph in all_paragraphs:
+        p_element = paragraph._p  # pylint: disable=protected-access
+
+        runs_with_hl = [r for r in p_element.findall(qn('w:r')) if r.find(qn('w:hyperlink')) is not None]
+        for r in runs_with_hl:
+            idx = list(p_element).index(r)
+            r_pr = r.find(qn('w:rPr'))
+
+            children = list(r)
+            new_elements = []
+            current_r = None
+
+            for child in children:
+                if child.tag == qn('w:rPr'):
+                    continue
+                elif child.tag == qn('w:hyperlink'):
+                    if current_r is not None and len(current_r.findall(qn('w:t'))) > 0:
+                        new_elements.append(current_r)
+                        current_r = None
+                    for inner_r in child.findall(qn('w:r')):
+                        style_hyperlink_run(inner_r, r_pr)
+                    new_elements.append(child)
+                else:
+                    if current_r is None:
+                        current_r = OxmlElement('w:r')
+                        if r_pr is not None:
+                            current_r.append(copy.deepcopy(r_pr))
+                    current_r.append(child)
+
+            if current_r is not None and len(current_r.findall(qn('w:t'))) > 0:
+                new_elements.append(current_r)
+
+            p_element.remove(r)
+            for new_el in reversed(new_elements):
+                p_element.insert(idx, new_el)
+            fixed_nested += 1
+
+        for hl in p_element.findall(qn('w:hyperlink')):
+            total_hyperlinks += 1
+            for inner_r in hl.findall(qn('w:r')):
+                style_hyperlink_run(inner_r)
+
+    if fixed_nested > 0 or total_hyperlinks > 0:
+        document.save(docx_path)
+    return fixed_nested, total_hyperlinks
+
+
+def postprocess_hyperlinks(docx_path):
+    """Enhancement perbaikan struktur dan visualisasi hyperlink."""
+    try:
+        fixed_nested, total_links = fix_hyperlinks_and_styles(docx_path)
+        if fixed_nested or total_links:
+            print(f'Hyperlink diproses: {total_links} link aktif ({fixed_nested} perbaikan XML).', file=sys.stderr)
+    except Exception as e:  # pylint: disable=broad-except
+        print(f'Post-processing hyperlink dilewati (non-fatal): {type(e).__name__}: {e}', file=sys.stderr)
+
+
 def postprocess_table_duplication(docx_path):
     """Enhancement non-kritis, pola sama spt post-processing lainnya."""
     try:
@@ -456,6 +585,7 @@ def main():
     postprocess_internal_links(input_path, output_path)
     postprocess_toc_formatting(output_path)
     postprocess_table_duplication(output_path)
+    postprocess_hyperlinks(output_path)
 
     print(f'OK: {output_path} ({os.path.getsize(output_path)} bytes)')
     sys.exit(0)
