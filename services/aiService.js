@@ -1,14 +1,42 @@
 const OpenAI = require('openai');
 
-const XKIRO_API_KEY =
-  process.env.XKIRO_API_KEY || 'sk-xt-2ff676bfd0c68a6b0dbc4fad3e5fb385ec7d889f75f93d4a';
-const XKIRO_BASE_URL = process.env.XKIRO_BASE_URL || 'https://api.xkiro.com/v1';
-const MODEL_NAME = process.env.XKIRO_MODEL || 'deepseek/deepseek-v4-pro';
+/**
+ * Sanitize URLs that might contain markdown format like [https://...](https://...)
+ */
+function sanitizeUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return 'https://api.xkiro.com/v1';
+  const match = rawUrl.match(/https?:\/\/[^\s\)\'\"\]]+/i);
+  return match ? match[0].replace(/\/+$/, '') : 'https://api.xkiro.com/v1';
+}
 
-const client = new OpenAI({
-  baseURL: XKIRO_BASE_URL,
-  apiKey: XKIRO_API_KEY,
-});
+/**
+ * Sanitize API keys to strip accidental quotes/brackets/markdown
+ */
+function sanitizeApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== 'string') return '';
+  const match = rawKey.match(/[a-zA-Z0-9_\-\.]+/);
+  return match ? match[0] : rawKey.trim();
+}
+
+const DEFAULT_XKIRO_KEY = 'sk-xt-2ff676bfd0c68a6b0dbc4fad3e5fb385ec7d889f75f93d4a';
+
+function getClientConfig() {
+  const envKey = sanitizeApiKey(process.env.XKIRO_API_KEY);
+  // If envKey is the old disabled one (sk-xt-2f80651c616f7193e1cf078bf8c91b52a7dc5473c0aa80c8), use DEFAULT_XKIRO_KEY
+  const apiKey = (envKey && !envKey.startsWith('sk-xt-2f80651c')) ? envKey : DEFAULT_XKIRO_KEY;
+  const baseURL = sanitizeUrl(process.env.XKIRO_BASE_URL);
+  const model = process.env.XKIRO_MODEL || 'deepseek/deepseek-v4-pro';
+
+  return { apiKey, baseURL, model };
+}
+
+function getClient() {
+  const { apiKey, baseURL } = getClientConfig();
+  return new OpenAI({
+    baseURL,
+    apiKey,
+  });
+}
 
 /**
  * Helper to parse JSON from LLM response safely
@@ -70,6 +98,8 @@ async function generateWithRetry(fn, retries = 2, delayMs = 1000) {
  */
 async function detectSensitiveDataWithAI(fullText, sampleLines = []) {
   const textToScan = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
+  const { model } = getClientConfig();
+  const client = getClient();
 
   const prompt = `Anda adalah sistem audit keamanan data dan privasi (PII Compliance Auditor) dokumen.
 Tugas Anda mendeteksi data pribadi dan sensitif (PII) yang TIDAK terdeteksi oleh regex baku, seperti:
@@ -98,7 +128,7 @@ Format setiap object:
   try {
     const completion = await generateWithRetry(() =>
       client.chat.completions.create({
-        model: MODEL_NAME,
+        model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
       })
@@ -117,6 +147,9 @@ Format setiap object:
  * 2. Table Verification for Convert (Excel/Word)
  */
 async function verifyTableStructureWithAI(tableSnippet, docType = 'Excel') {
+  const { model } = getClientConfig();
+  const client = getClient();
+
   const prompt = `Anda adalah analis struktur konversi tabel dokumen ke format ${docType}.
 Analisis cuplikan data teks berikut yang diekstrak dari tabel PDF:
 ---
@@ -139,7 +172,7 @@ Kembalikan HANYA format JSON murni:
   try {
     const completion = await generateWithRetry(() =>
       client.chat.completions.create({
-        model: MODEL_NAME,
+        model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
       })
@@ -180,6 +213,8 @@ Kembalikan HANYA format JSON murni:
  */
 async function summarizeDocumentWithAI(fullText) {
   const textToSummarize = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
+  const { model } = getClientConfig();
+  const client = getClient();
 
   const prompt = `Anda adalah asisten cerdas analis dokumen. Buat ringkasan ringkas dan berbobot dari dokumen PDF berikut.
 Aturan:
@@ -204,7 +239,7 @@ Kembalikan HANYA format JSON murni:
   try {
     const completion = await generateWithRetry(() =>
       client.chat.completions.create({
-        model: MODEL_NAME,
+        model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
       })
@@ -289,6 +324,8 @@ async function generateRedactionAuditReport(auditData) {
  */
 async function chatWithPdf(fullText, question, conversationHistory = []) {
   const textContext = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
+  const { model } = getClientConfig();
+  const client = getClient();
 
   const systemInstruction = `Anda adalah asisten cerdas "Tanya Dokumen PDF".
 Tugas Anda adalah menjawab pertanyaan pengguna secara akurat HANYA berdasarkan isi teks dokumen PDF yang diberikan di bawah ini.
@@ -320,7 +357,7 @@ ${textContext}
   try {
     const completion = await generateWithRetry(() =>
       client.chat.completions.create({
-        model: MODEL_NAME,
+        model,
         messages,
         temperature: 0.2,
       })
@@ -350,4 +387,6 @@ module.exports = {
   summarizeDocumentWithAI,
   generateRedactionAuditReport,
   chatWithPdf,
+  sanitizeUrl,
+  sanitizeApiKey,
 };
