@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const { GoogleGenAI } = require('@google/genai');
 
 /**
  * Sanitize URLs that might contain markdown format like [https://...](https://...)
@@ -20,22 +21,69 @@ function sanitizeApiKey(rawKey) {
 
 const DEFAULT_XKIRO_KEY = 'sk-xt-2ff676bfd0c68a6b0dbc4fad3e5fb385ec7d889f75f93d4a';
 
-function getClientConfig() {
+function getXkiroConfig() {
   const envKey = sanitizeApiKey(process.env.XKIRO_API_KEY);
-  // If envKey is the old disabled one (sk-xt-2f80651c616f7193e1cf078bf8c91b52a7dc5473c0aa80c8), use DEFAULT_XKIRO_KEY
-  const apiKey = (envKey && !envKey.startsWith('sk-xt-2f80651c')) ? envKey : DEFAULT_XKIRO_KEY;
+  const apiKey = envKey && !envKey.startsWith('sk-xt-2f80651c') ? envKey : DEFAULT_XKIRO_KEY;
   const baseURL = sanitizeUrl(process.env.XKIRO_BASE_URL);
   const model = process.env.XKIRO_MODEL || 'deepseek/deepseek-v4-pro';
-
   return { apiKey, baseURL, model };
 }
 
-function getClient() {
-  const { apiKey, baseURL } = getClientConfig();
+function getOpenAIClient() {
+  const { apiKey, baseURL } = getXkiroConfig();
   return new OpenAI({
     baseURL,
     apiKey,
   });
+}
+
+function getGeminiClient() {
+  const apiKey = sanitizeApiKey(process.env.GEMINI_API_KEY);
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+/**
+ * Robust Gemini model cascade (gemini-flash-latest, gemini-3.7-flash, gemini-3.1-flash-lite)
+ */
+async function generateWithGeminiCascade({ contents, systemInstruction, temperature = 0.2 }) {
+  const ai = getGeminiClient();
+  const candidateModels = [
+    'gemini-flash-latest',
+    'gemini-3.7-flash',
+    'gemini-3.1-flash-lite',
+  ];
+  let lastError;
+
+  for (const model of candidateModels) {
+    try {
+      const config = { temperature };
+      if (systemInstruction) config.systemInstruction = systemInstruction;
+
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config,
+      });
+
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(
+        `[AI Service - Gemini Fallback] Model ${model} unavailable: ${err.message}. Trying next candidate...`
+      );
+    }
+  }
+
+  throw lastError || new Error('Semua model Gemini sedang tidak tersedia');
 }
 
 /**
@@ -69,26 +117,35 @@ function extractJson(text) {
 }
 
 /**
- * Helper with retry logic
+ * Executes a call with Primary (DeepSeek xkiro) and automatic fallback to Secondary (Google Gemini)
  */
-async function generateWithRetry(fn, retries = 2, delayMs = 1000) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const errMsg = err.message || '';
-      const isRetryable =
-        errMsg.includes('503') ||
-        errMsg.includes('429') ||
-        errMsg.includes('timeout') ||
-        errMsg.includes('rate limit');
+async function callWithFallback({
+  deepseekFn,
+  geminiFn,
+  operationName = 'AI Task',
+}) {
+  try {
+    // Attempt Primary: DeepSeek on xkiro
+    return await deepseekFn();
+  } catch (primaryErr) {
+    console.warn(
+      `[AI Service] Primary (DeepSeek xkiro) encountered limit or error for "${operationName}": ${primaryErr.message}. Automatically falling back to Google Gemini...`
+    );
 
-      if (isRetryable && attempt < retries) {
-        console.warn(`[AI Service xkiro] Retry attempt ${attempt + 1}: ${errMsg}`);
-        await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-      } else {
-        throw err;
-      }
+    try {
+      // Attempt Fallback: Google Gemini (multi-model cascade)
+      const geminiResult = await geminiFn();
+      console.log(
+        `[AI Service] Fallback (Google Gemini) completed successfully for "${operationName}"`
+      );
+      return geminiResult;
+    } catch (fallbackErr) {
+      console.error(
+        `[AI Service] Fallback (Google Gemini) also failed for "${operationName}": ${fallbackErr.message}`
+      );
+      throw new Error(
+        `Gagal memproses dengan DeepSeek (${primaryErr.message}) maupun Gemini (${fallbackErr.message})`
+      );
     }
   }
 }
@@ -98,8 +155,6 @@ async function generateWithRetry(fn, retries = 2, delayMs = 1000) {
  */
 async function detectSensitiveDataWithAI(fullText, sampleLines = []) {
   const textToScan = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
-  const { model } = getClientConfig();
-  const client = getClient();
 
   const prompt = `Anda adalah sistem audit keamanan data dan privasi (PII Compliance Auditor) dokumen.
 Tugas Anda mendeteksi data pribadi dan sensitif (PII) yang TIDAK terdeteksi oleh regex baku, seperti:
@@ -126,19 +181,30 @@ Format setiap object:
 ]`;
 
   try {
-    const completion = await generateWithRetry(() =>
-      client.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-      })
-    );
+    const raw = await callWithFallback({
+      operationName: 'detectSensitiveData',
+      deepseekFn: async () => {
+        const { model } = getXkiroConfig();
+        const client = getOpenAIClient();
+        const completion = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+        });
+        return completion.choices[0]?.message?.content || '[]';
+      },
+      geminiFn: async () => {
+        return await generateWithGeminiCascade({
+          contents: prompt,
+          temperature: 0.1,
+        });
+      },
+    });
 
-    const raw = completion.choices[0]?.message?.content || '[]';
     const parsed = extractJson(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
-    console.error('Error in detectSensitiveDataWithAI (xkiro):', err.message);
+    console.error('Error in detectSensitiveDataWithAI:', err.message);
     return [];
   }
 }
@@ -147,9 +213,6 @@ Format setiap object:
  * 2. Table Verification for Convert (Excel/Word)
  */
 async function verifyTableStructureWithAI(tableSnippet, docType = 'Excel') {
-  const { model } = getClientConfig();
-  const client = getClient();
-
   const prompt = `Anda adalah analis struktur konversi tabel dokumen ke format ${docType}.
 Analisis cuplikan data teks berikut yang diekstrak dari tabel PDF:
 ---
@@ -170,15 +233,26 @@ Kembalikan HANYA format JSON murni:
 }`;
 
   try {
-    const completion = await generateWithRetry(() =>
-      client.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-      })
-    );
+    const raw = await callWithFallback({
+      operationName: 'verifyTableStructure',
+      deepseekFn: async () => {
+        const { model } = getXkiroConfig();
+        const client = getOpenAIClient();
+        const completion = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+        });
+        return completion.choices[0]?.message?.content || '{}';
+      },
+      geminiFn: async () => {
+        return await generateWithGeminiCascade({
+          contents: prompt,
+          temperature: 0.1,
+        });
+      },
+    });
 
-    const raw = completion.choices[0]?.message?.content || '{}';
     const parsed = extractJson(raw);
     if (parsed && typeof parsed.score === 'number') {
       return parsed;
@@ -194,7 +268,7 @@ Kembalikan HANYA format JSON murni:
       recommendation: 'Tabel siap diekspor ke format yang dipilih.',
     };
   } catch (err) {
-    console.error('Error in verifyTableStructureWithAI (xkiro):', err.message);
+    console.error('Error in verifyTableStructureWithAI:', err.message);
     return {
       score: 85,
       status: 'Normal',
@@ -213,8 +287,6 @@ Kembalikan HANYA format JSON murni:
  */
 async function summarizeDocumentWithAI(fullText) {
   const textToSummarize = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
-  const { model } = getClientConfig();
-  const client = getClient();
 
   const prompt = `Anda adalah asisten cerdas analis dokumen. Buat ringkasan ringkas dan berbobot dari dokumen PDF berikut.
 Aturan:
@@ -237,15 +309,26 @@ Kembalikan HANYA format JSON murni:
 }`;
 
   try {
-    const completion = await generateWithRetry(() =>
-      client.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-      })
-    );
+    const raw = await callWithFallback({
+      operationName: 'summarizeDocument',
+      deepseekFn: async () => {
+        const { model } = getXkiroConfig();
+        const client = getOpenAIClient();
+        const completion = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+        });
+        return completion.choices[0]?.message?.content || '{}';
+      },
+      geminiFn: async () => {
+        return await generateWithGeminiCascade({
+          contents: prompt,
+          temperature: 0.2,
+        });
+      },
+    });
 
-    const raw = completion.choices[0]?.message?.content || '{}';
     const parsed = extractJson(raw);
     if (parsed && parsed.summary) {
       return parsed;
@@ -260,7 +343,7 @@ Kembalikan HANYA format JSON murni:
       importantDatesOrDeadlines: [],
     };
   } catch (err) {
-    console.error('Error in summarizeDocumentWithAI (xkiro):', err.message);
+    console.error('Error in summarizeDocumentWithAI:', err.message);
     return {
       docType: 'Dokumen Umum',
       summary: 'Dokumen berhasil diekstrak dan siap untuk proses pengeditan serta ekspor lebih lanjut.',
@@ -293,7 +376,12 @@ async function generateRedactionAuditReport(auditData) {
     const cat = item.category || 'Lainnya';
     categories[cat] = (categories[cat] || 0) + 1;
     const method = item.method || 'Manual';
-    if (method.includes('AI') || method.includes('Gemini') || method.includes('DeepSeek')) methods.AI = (methods.AI || 0) + 1;
+    if (
+      method.includes('AI') ||
+      method.includes('Gemini') ||
+      method.includes('DeepSeek')
+    )
+      methods.AI = (methods.AI || 0) + 1;
     else if (method.includes('Regex')) methods.Regex = (methods.Regex || 0) + 1;
     else methods.Manual = (methods.Manual || 0) + 1;
   });
@@ -324,8 +412,6 @@ async function generateRedactionAuditReport(auditData) {
  */
 async function chatWithPdf(fullText, question, conversationHistory = []) {
   const textContext = fullText.length > 25000 ? fullText.substring(0, 25000) : fullText;
-  const { model } = getClientConfig();
-  const client = getClient();
 
   const systemInstruction = `Anda adalah asisten cerdas "Tanya Dokumen PDF".
 Tugas Anda adalah menjawab pertanyaan pengguna secara akurat HANYA berdasarkan isi teks dokumen PDF yang diberikan di bawah ini.
@@ -340,39 +426,61 @@ Isi Teks Dokumen PDF:
 ${textContext}
 ---`;
 
-  const messages = [
-    { role: 'system', content: systemInstruction },
-  ];
-
-  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-    conversationHistory.forEach((msg) => {
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        messages.push({ role: msg.role, content: msg.content });
-      }
-    });
-  }
-
-  messages.push({ role: 'user', content: question });
-
   try {
-    const completion = await generateWithRetry(() =>
-      client.chat.completions.create({
-        model,
-        messages,
-        temperature: 0.2,
-      })
-    );
+    const answer = await callWithFallback({
+      operationName: 'chatWithPdf',
+      deepseekFn: async () => {
+        const { model } = getXkiroConfig();
+        const client = getOpenAIClient();
 
-    const answer =
-      completion.choices[0]?.message?.content?.trim() ||
-      'Maaf, tidak dapat menghasilkan jawaban saat ini.';
+        const messages = [{ role: 'system', content: systemInstruction }];
+        if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+          conversationHistory.forEach((msg) => {
+            if (msg.role === 'user' || msg.role === 'assistant') {
+              messages.push({ role: msg.role, content: msg.content });
+            }
+          });
+        }
+        messages.push({ role: 'user', content: question });
+
+        const completion = await client.chat.completions.create({
+          model,
+          messages,
+          temperature: 0.2,
+        });
+
+        return (
+          completion.choices[0]?.message?.content?.trim() ||
+          'Maaf, tidak dapat menghasilkan jawaban saat ini.'
+        );
+      },
+      geminiFn: async () => {
+        const contents = [];
+        if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+          conversationHistory.forEach((msg) => {
+            if (msg.role === 'user') {
+              contents.push({ role: 'user', parts: [{ text: msg.content }] });
+            } else if (msg.role === 'assistant') {
+              contents.push({ role: 'model', parts: [{ text: msg.content }] });
+            }
+          });
+        }
+        contents.push({ role: 'user', parts: [{ text: question }] });
+
+        return await generateWithGeminiCascade({
+          contents,
+          systemInstruction,
+          temperature: 0.2,
+        });
+      },
+    });
 
     return {
       question,
       answer,
     };
   } catch (err) {
-    console.error('Error in chatWithPdf (xkiro):', err.message);
+    console.error('Error in chatWithPdf:', err.message);
     return {
       question,
       answer:
@@ -387,6 +495,8 @@ module.exports = {
   summarizeDocumentWithAI,
   generateRedactionAuditReport,
   chatWithPdf,
+  generateWithGeminiCascade,
   sanitizeUrl,
   sanitizeApiKey,
+  callWithFallback,
 };
