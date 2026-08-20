@@ -307,7 +307,7 @@
   <div class="flex items-center justify-between mb-2">
     <div class="flex items-center gap-1.5 min-w-0">
       <span class="material-symbols-outlined text-primary text-[18px]">smart_toy</span>
-      <h3 class="font-label-sm font-bold text-on-surface truncate">Tanya PDF (Gemini)</h3>
+      <h3 class="font-label-sm font-bold text-on-surface truncate">Tanya PDF (AI DeepSeek)</h3>
     </div>
     <button id="btn-clear-chat" class="text-[11px] text-on-surface-variant hover:text-error transition-colors flex items-center gap-0.5" title="Hapus pesan percakapan">
       <span class="material-symbols-outlined text-[14px]">delete_sweep</span> Bersihkan
@@ -369,8 +369,8 @@
 <button id="btn-auto-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#2b5742] hover:bg-[#e8f3ec]" title="Cari & tandai otomatis dengan Regex cepat: NIK, No. Telepon, Email, Nominal Uang, Alamat, Tanggal Lahir, NPWP, Plat Nomor">
 <span class="material-symbols-outlined text-[16px]">privacy_tip</span> Regex Cepat
 </button>
-<button id="btn-hybrid-ai-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#1e40af] hover:bg-[#dbeafe]" title="Pindai data sensitif lengkap dengan AI Gemini (nama tanpa label, alamat bebas, ID institusi, data rahasia)">
-<span class="material-symbols-outlined text-[16px]">psychology</span> Deteksi AI (Gemini)
+<button id="btn-hybrid-ai-redact" class="btn-disabled px-2.5 py-1.5 rounded-full text-label-sm flex items-center gap-1 text-[#1e40af] hover:bg-[#dbeafe]" title="Pindai data sensitif lengkap dengan AI DeepSeek (nama tanpa label, alamat bebas, ID institusi, data rahasia)">
+<span class="material-symbols-outlined text-[16px]">psychology</span> Deteksi AI (DeepSeek)
 </button>
 <button id="btn-custom-patterns-toggle" class="btn-disabled px-2 py-1.5 rounded-full text-label-sm flex items-center text-[#2b5742] hover:bg-[#e8f3ec]" title="Atur pola data sensitif kustom">
 <span class="material-symbols-outlined text-[16px]">tune</span>
@@ -700,7 +700,7 @@
       <div class="flex items-center gap-2">
         <span class="material-symbols-outlined text-[#1e40af] text-[24px]">psychology</span>
         <div>
-          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Tinjau Temuan Data Sensitif (AI Gemini)</h3>
+          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">Tinjau Temuan Data Sensitif (AI DeepSeek)</h3>
           <p class="font-label-sm text-on-surface-variant">Periksa temuan AI sebelum ditandai untuk sensor permanen</p>
         </div>
       </div>
@@ -4519,7 +4519,7 @@
         const rawFindings = res.findings || (res.data && res.data.findings) || [];
         aiFindings = rawFindings.map((f) => ({
           ...f,
-          method: 'AI Gemini',
+          method: 'AI DeepSeek',
         }));
       } catch (e) {
         console.warn('AI detect fallback:', e);
@@ -4557,10 +4557,10 @@
     const closeBtn = document.getElementById('ai-sensitive-close');
 
     listEl.innerHTML = '';
-    summaryEl.textContent = `${findings.length} data sensitif terdeteksi (Regex + AI Gemini)`;
+    summaryEl.textContent = `${findings.length} data sensitif terdeteksi (Regex + AI DeepSeek)`;
 
     findings.forEach((item, idx) => {
-      const isAi = item.method === 'AI Gemini';
+      const isAi = item.method === 'AI DeepSeek';
       const card = document.createElement('div');
       card.className = `p-2.5 rounded-lg border ${isAi ? 'border-[#bfdbfe] bg-[#f0f7ff]' : 'border-outline-variant bg-surface'} flex items-start gap-2.5`;
       card.innerHTML = `
@@ -4980,7 +4980,7 @@ Diterbitkan oleh: Scripta PDF Workspace Audit Engine
     typingWrap.innerHTML = `
       <div class="p-2 bg-surface-container-high rounded-xl text-xs text-on-surface-variant flex items-center gap-1.5">
         <span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-        <span>Gemini sedang membaca dokumen...</span>
+        <span>AI sedang membaca dokumen...</span>
       </div>
     `;
     aiChatMessages.appendChild(typingWrap);
